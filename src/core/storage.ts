@@ -297,6 +297,25 @@ export async function listManifests(
   return values.filter(isManifest).sort((a, b) => compare(a.version, b.version));
 }
 
+/**
+ * The versions of a package that have a manifest (yanked included), lowest first by `compare`,
+ * from a single listing and without reading any manifest.
+ */
+export async function listVersionNames(
+  env: StorageEnv,
+  eco: Eco,
+  name: string,
+  compare: (a: string, b: string) => number = compareVersionStrings,
+): Promise<string[]> {
+  const prefix = packagePrefix(eco, name);
+  const versions: string[] = [];
+  for (const { key } of await listAll(env, prefix)) {
+    const rest = key.slice(prefix.length).split("/");
+    if (rest.length === 2 && rest[1] === MANIFEST_FILE) versions.push(rest[0] ?? "");
+  }
+  return versions.sort(compare);
+}
+
 /** Decoded names of every package of an ecosystem that has anything stored, sorted. */
 export async function listPackageNames(env: StorageEnv, eco: Eco): Promise<string[]> {
   const prefix = `${eco}/pkg/`;

@@ -8,6 +8,12 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Fixed
+
+- The admin package list (`/admin/packages`) failed with a `500` ("Too many API requests by
+  single Worker invocation") on a registry with many versions, because it read every version
+  manifest. It now reads one manifest per package, the highest version's.
+
 ## [0.2.2] - 2026-10-28
 
 ### Added

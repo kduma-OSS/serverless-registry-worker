@@ -9,7 +9,7 @@
  */
 
 import type { Eco } from "../adapters/types";
-import type { PackageView } from "../core/packages";
+import type { PackageSummary, PackageView } from "../core/packages";
 import { ECO_NAMES, ecoBadge, packageHref, plural } from "./catalog";
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
@@ -28,7 +28,7 @@ function byteOrder(a: string, b: string): number {
  * Sorted by name, ignoring case; the same name in two ecosystems by ecosystem, names that
  * differ only in case in byte order.
  */
-export function sortPackages(packages: readonly PackageView[]): PackageView[] {
+export function sortPackages<T extends PackageSummary>(packages: readonly T[]): T[] {
   return [...packages].sort(
     (a, b) =>
       byteOrder(a.name.toLowerCase(), b.name.toLowerCase()) ||
@@ -37,7 +37,7 @@ export function sortPackages(packages: readonly PackageView[]): PackageView[] {
   );
 }
 
-function latest(view: PackageView): SafeHtml {
+function latest(view: PackageSummary): SafeHtml {
   const top = view.versions[0];
   if (top === undefined) return markup``;
   const yanked = top.yanked ? markup` <span class="badge warn">yanked</span>` : "";
@@ -45,9 +45,9 @@ function latest(view: PackageView): SafeHtml {
 }
 
 /** Actions shown at the end of a package's row (the admin list). */
-export type RowActions = (view: PackageView) => SafeHtml;
+export type RowActions = (view: PackageSummary) => SafeHtml;
 
-function row(view: PackageView, actions?: RowActions): SafeHtml {
+function row(view: PackageSummary, actions?: RowActions): SafeHtml {
   const link = markup`<a class="pkg-link" href="${packageHref(view.eco, view.name)}">
 ${ecoBadge(view.eco)}
 <span class="pkg-name">${view.name}</span>
@@ -61,7 +61,7 @@ ${link}${end}
 }
 
 /** The ecosystems present, sorted by display name. */
-function ecosystemsOf(packages: readonly PackageView[]): Eco[] {
+function ecosystemsOf(packages: readonly PackageSummary[]): Eco[] {
   return [...new Set(packages.map((p) => p.eco))].sort((a, b) =>
     ECO_NAMES[a].localeCompare(ECO_NAMES[b], "en"),
   );
@@ -71,7 +71,7 @@ function ecosystemsOf(packages: readonly PackageView[]): Eco[] {
  * The filter bar (with two or more packages): a labelled name filter and, with two or more
  * ecosystems, a toggle chip per ecosystem. Hidden until `public/app.js` enables it.
  */
-function filterBar(packages: readonly PackageView[]): SafeHtml {
+function filterBar(packages: readonly PackageSummary[]): SafeHtml {
   if (packages.length < 2) return markup``;
   const ecos = ecosystemsOf(packages);
   const chips =
@@ -94,7 +94,7 @@ ${chips}
  * `hint`), with `actions` at the end of each row when given.
  */
 export function packageList(
-  packages: readonly PackageView[],
+  packages: readonly PackageSummary[],
   hint: string,
   actions?: RowActions,
 ): SafeHtml {

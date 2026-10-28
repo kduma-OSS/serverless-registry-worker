@@ -8,7 +8,12 @@ import type { Identity, Kind } from "../../src/core/auth";
 import { ValidationError } from "../../src/core/errors";
 import type { Grant } from "../../src/core/grants";
 import { deleteVersion, reindex, yank } from "../../src/core/admin";
-import { allDependencies, getPackage, listPackages } from "../../src/core/packages";
+import {
+  allDependencies,
+  getPackage,
+  listPackages,
+  listPackageSummaries,
+} from "../../src/core/packages";
 import { addPackageToMeta, setVersionDeps, writeManifest } from "../../src/core/storage";
 import { identityOf } from "../records";
 
@@ -105,6 +110,31 @@ describe("listPackages", () => {
     const { packages } = await listPackages({ ...env, ECOSYSTEMS: "npm" }, identity("admin"));
     expect(packages.some((p) => p.name === `${v}/a`)).toBe(false);
     expect(await code(listPackages(env, identity("publish")))).toBe("forbidden");
+  });
+});
+
+describe("listPackageSummaries", () => {
+  it("lists every package for admin with the top version's yanked flag, reading one manifest each", async () => {
+    const v = vendor();
+    await seed(`${v}/b`, [
+      ["1.0.0", false],
+      ["1.10.0", true],
+      ["1.2.0", false],
+    ]);
+    await seed(`${v}/a`, [["0.1.0", false]]);
+    const mine = (await listPackageSummaries(env, identity("admin"))).filter((p) =>
+      p.name.startsWith(`${v}/`),
+    );
+    expect(mine.map((p) => p.name)).toEqual([`${v}/a`, `${v}/b`]);
+    expect(mine[1]?.versions).toEqual([
+      { version: "1.10.0", yanked: true },
+      { version: "1.2.0" },
+      { version: "1.0.0" },
+    ]);
+  });
+
+  it("refuses credentials other than admin", async () => {
+    expect(await code(listPackageSummaries(env, identity("read")))).toBe("forbidden");
   });
 });
 

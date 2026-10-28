@@ -71,7 +71,7 @@ import {
   verifyEntryTotp,
   type LoginSession,
 } from "./core/login";
-import { listPackages } from "./core/packages";
+import { listPackages, listPackageSummaries } from "./core/packages";
 import { checkLatestRelease, releaseForHeader, updateStatus, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
 import { adminPackagesPage, credentialHref } from "./pages/admin";
@@ -394,7 +394,7 @@ function adminRoute(
 }
 
 const adminPackages = adminRoute(async (r, identity, ctx) =>
-  htmlResponse(adminPackagesPage(ctx, (await listPackages(r.env, identity)).packages)),
+  htmlResponse(adminPackagesPage(ctx, await listPackageSummaries(r.env, identity))),
 );
 
 const acceptBucketPost = adminRoute(async (r) => {

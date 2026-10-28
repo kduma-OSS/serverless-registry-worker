@@ -7,7 +7,7 @@
  */
 
 import type { AuthEntry, Credential } from "../core/auth";
-import type { PackageView } from "../core/packages";
+import type { PackageSummary } from "../core/packages";
 import { markup, type SafeHtml } from "./html";
 import { packageList } from "./consumer";
 import { layout, type PageContext } from "./layout";
@@ -120,7 +120,7 @@ export function awaitsPin(entry: AuthEntry): boolean {
 export const NO_PACKAGES_PUBLISHED = "No packages have been published yet.";
 
 /** "Reindex" and "Delete" at the end of a row of the admin package list. */
-function packageActions(view: PackageView): SafeHtml {
+function packageActions(view: PackageSummary): SafeHtml {
   const url = apiPath("packages", view.eco, view.name);
   const reindex = apiButton("Reindex", "POST", `${url}/reindex`, {
     message: `Rebuild the index of ${view.name} from its manifests?`,
@@ -139,7 +139,7 @@ function packageActions(view: PackageView): SafeHtml {
 }
 
 /** `GET /admin/packages`: every package in one sorted list, each row with its actions. */
-export function adminPackagesPage(ctx: PageContext, packages: readonly PackageView[]): string {
+export function adminPackagesPage(ctx: PageContext, packages: readonly PackageSummary[]): string {
   const content =
     packages.length === 0
       ? markup`<div class="pkg-empty"><p>${NO_PACKAGES_PUBLISHED}</p></div>`
