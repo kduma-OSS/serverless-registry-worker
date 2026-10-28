@@ -1,0 +1,38 @@
+name: Changelog
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Changelog entry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Require a change under [Unreleased]
+        env:
+          SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'skip-changelog') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$SKIP" = true ]; then
+            echo "The 'skip-changelog' label is set; no changelog entry required."
+            exit 0
+          fi
+
+          unreleased() {
+            git show "$1:CHANGELOG.md" 2>/dev/null |
+              awk '/^## \[Unreleased\]/ { f = 1; next } /^## \[/ { f = 0 } f'
+          }
+
+          if [ "$(unreleased "$BASE_SHA")" = "$(unreleased "$HEAD_SHA")" ]; then
+            echo "::error file=CHANGELOG.md::Add an entry under '## [Unreleased]' in CHANGELOG.md, or label the pull request 'skip-changelog' if it needs none."
+            exit 1
+          fi
+          echo "CHANGELOG.md has a new entry under [Unreleased]."
