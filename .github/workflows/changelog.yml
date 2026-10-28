@@ -18,11 +18,16 @@ jobs:
       - name: Require a change under [Unreleased]
         env:
           SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'skip-changelog') }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "$SKIP" = true ]; then
             echo "The 'skip-changelog' label is set; no changelog entry required."
+            exit 0
+          fi
+          if [ "$AUTHOR" = 'dependabot[bot]' ]; then
+            echo "Dependabot pull request; no changelog entry required."
             exit 0
           fi
 
