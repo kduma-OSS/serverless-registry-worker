@@ -133,8 +133,26 @@ describe("listPackageSummaries", () => {
     ]);
   });
 
-  it("refuses credentials other than admin", async () => {
-    expect(await code(listPackageSummaries(env, identity("read")))).toBe("forbidden");
+  it("shows a reader only the packages and versions its grants cover", async () => {
+    const v = vendor();
+    await seed(`${v}/sdk`, [
+      ["1.0.0", false],
+      ["2.0.0", true],
+      ["2.1.0", false],
+    ]);
+    await seed(`${v}/hidden`, [["1.0.0", false]]);
+    const reader = identity("read", [{ eco: "composer", package: `${v}/sdk`, versions: "^2.0" }]);
+    expect(await listPackageSummaries(env, reader)).toEqual([
+      {
+        eco: "composer",
+        name: `${v}/sdk`,
+        versions: [{ version: "2.1.0", yanked: false }, { version: "2.0.0" }],
+      },
+    ]);
+  });
+
+  it("refuses publish credentials", async () => {
+    expect(await code(listPackageSummaries(env, identity("publish")))).toBe("forbidden");
   });
 });
 

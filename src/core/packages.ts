@@ -211,24 +211,33 @@ export async function getPackage(
 }
 
 /**
- * `GET /admin/packages`: every package of the enabled ecosystems, for the admin's list. A
- * package costs one listing and one read (the highest version's manifest, for its display name
- * and `yanked` flag) however many versions it has, so the page stays within the limit on the
- * calls to R2 that a single request may make. Only the highest version is described; the others
+ * The packages of the home page and the admin's list, without their manifests: `admin` sees
+ * every package, `read` those with a version its explicit grants cover. A package costs one
+ * listing and one read (the highest visible version's manifest, for its display name and
+ * `yanked` flag) however many versions it has, so the page stays within the limit on the calls
+ * to R2 that a single request may make. Only the highest version is described; the others
  * carry just their number.
  */
 export async function listPackageSummaries(
   env: PackagesEnv,
   identity: Identity,
 ): Promise<PackageSummary[]> {
-  requireRole(identity, "admin");
+  requireRole(identity, "read", "admin");
   const meta = await readPackagesMeta(env);
   const summaries: PackageSummary[] = [];
   for (const adapter of enabledAdapters(env).sort((a, b) => byteOrder(a.eco, b.eco))) {
-    const names = Object.keys(meta[adapter.eco]).sort(byteOrder);
+    const names = Object.keys(meta[adapter.eco])
+      .filter((name) => mayList(identity, adapter.eco, name))
+      .sort(byteOrder);
     const found = await Promise.all(
       names.map(async (name): Promise<PackageSummary | null> => {
-        const versions = await listVersionNames(env, adapter.eco, name, adapter.compareVersions);
+        const versions = (
+          await listVersionNames(env, adapter.eco, name, adapter.compareVersions)
+        ).filter(
+          (version) =>
+            hasRole(identity, "admin") ||
+            isAllowed(identity.grants.read, adapter.eco, name, version, adapter.satisfies),
+        );
         const top = versions[versions.length - 1];
         if (top === undefined) return null;
         const manifest = await readManifest(env, adapter.eco, name, top);
@@ -243,7 +252,7 @@ export async function listPackageSummaries(
         };
       }),
     );
-    summaries.push(...found.filter((s) => s !== null));
+    summaries.push(...found.filter((p) => p !== null));
   }
   return summaries;
 }

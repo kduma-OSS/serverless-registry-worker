@@ -71,7 +71,7 @@ import {
   verifyEntryTotp,
   type LoginSession,
 } from "./core/login";
-import { listPackages, listPackageSummaries } from "./core/packages";
+import { listPackageSummaries } from "./core/packages";
 import { checkLatestRelease, releaseForHeader, updateStatus, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
 import { adminPackagesPage, credentialHref } from "./pages/admin";
@@ -271,7 +271,7 @@ async function renderHome(r: PanelRequest, identity: Identity): Promise<Response
     return redirect(section?.href ?? "/admin/packages");
   }
   if (hasRole(identity, "read")) {
-    return htmlResponse(consumerPage(ctx, (await listPackages(r.env, identity)).packages));
+    return htmlResponse(consumerPage(ctx, await listPackageSummaries(r.env, identity)));
   }
   return htmlResponse(publishPage(ctx));
 }

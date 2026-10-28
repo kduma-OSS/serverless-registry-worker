@@ -9,7 +9,7 @@
  */
 
 import type { Eco } from "../adapters/types";
-import type { PackageSummary, PackageView } from "../core/packages";
+import type { PackageSummary } from "../core/packages";
 import { ECO_NAMES, ecoBadge, packageHref, plural } from "./catalog";
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
@@ -110,7 +110,7 @@ ${sorted.map((view) => row(view, actions))}
 }
 
 /** The consumer view. */
-export function consumerPage(ctx: PageContext, packages: readonly PackageView[]): string {
+export function consumerPage(ctx: PageContext, packages: readonly PackageSummary[]): string {
   const content =
     packages.length === 0
       ? markup`<div class="pkg-empty">
