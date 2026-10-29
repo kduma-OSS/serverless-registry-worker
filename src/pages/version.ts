@@ -19,8 +19,10 @@ import {
   snippetList,
 } from "./catalog";
 import { formatBytes } from "./components";
+import type { PackageGroups } from "../core/groups";
 import { markup, type SafeHtml } from "./html";
 import { homeHref, layout, type PageContext } from "./layout";
+import { groupCrumbs } from "./package";
 
 /** One file of the version page. */
 export interface VersionFile extends ManifestFile {
@@ -45,6 +47,8 @@ export interface VersionPageData {
   meta?: Record<string, unknown>;
   /** `adapter.versionSnippets` for this version: how to get exactly it. */
   snippets?: Snippet[];
+  /** The package groups and the group the package is in: the breadcrumb shows its path. */
+  groups?: { state: PackageGroups; current: string | null };
 }
 
 /** `1234567` → `1,234,567`. */
@@ -90,6 +94,7 @@ ${snippetList(snippets, "pin")}
 /** The version page. */
 export function versionPage(ctx: PageContext, data: VersionPageData): string {
   const pkg = packageHref(data.eco, data.name);
+  const admin = ctx.user?.roles.includes("admin") === true;
   const yanked = data.yanked
     ? markup`<p class="hint"><span class="badge warn">yanked</span> This version is no longer offered to dependency resolution; existing lockfiles can still download it.</p>`
     : "";
@@ -99,6 +104,7 @@ export function versionPage(ctx: PageContext, data: VersionPageData): string {
     markup`<div class="catalog">
 ${breadcrumbs([
   { label: "Packages", href: homeHref(ctx) },
+  ...groupCrumbs(data.groups, admin, homeHref(ctx)),
   { label: data.name, href: pkg },
   { label: data.version },
 ])}

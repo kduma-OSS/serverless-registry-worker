@@ -167,8 +167,8 @@ function deletePackage(view: PackageView): SafeHtml {
  * list. Whoever is not an admin does not see a hidden group (the lists leave it out), so
  * nothing of its path is shown to them.
  */
-function groupCrumbs(
-  groups: PackagePageData["groups"],
+export function groupCrumbs(
+  groups: { state: PackageGroups; current: string | null } | undefined,
   admin: boolean,
   home: string,
 ): { label: string; href: string }[] {

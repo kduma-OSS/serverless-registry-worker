@@ -8,6 +8,10 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Changed
+
+- The breadcrumb of a version page shows the package's groups too, like the package page.
+
 ### Added
 
 - The one-time pages of a new token or login show a ready message for the person it is for:

@@ -392,7 +392,14 @@ const versionView = packageRoute(async (r, identity, ctx) => {
   const { eco = "", name = "", version = "" } = r.params;
   const base = publicUrl(r.env, r.request);
   const data = await visibleVersion(r.env, identity, eco, name, version, base);
-  return data === null ? notFoundPage(ctx) : htmlResponse(versionPage(ctx, data));
+  if (data === null) return notFoundPage(ctx);
+  const groups = await readGroups(r.env);
+  return htmlResponse(
+    versionPage(ctx, {
+      ...data,
+      groups: { state: groups, current: groupOf(groups, data.eco, data.name) },
+    }),
+  );
 });
 
 const download = packageRoute(async (r, identity, ctx) => {
