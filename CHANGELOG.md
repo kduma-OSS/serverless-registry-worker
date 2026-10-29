@@ -8,6 +8,8 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-29
+
 ### Changed
 
 - The breadcrumb of a version page shows the package's groups too, like the package page.
@@ -632,7 +634,8 @@ out breaking changes and changes that require a data migration in their own sect
   centred pages hang their card from a fixed distance below the top, and on phones the
   segments of the switch keep their text off the edge.
 
-[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/kduma-OSS/serverless-registry-worker/compare/v0.3.2...v0.3.3
