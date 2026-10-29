@@ -10,11 +10,13 @@ import type { Env } from "../env";
 import { tokenPrefix } from "./config";
 import {
   GH_EXTRA_FIELDS,
+  GRANT_ROLES,
   KINDS,
   SCOPE_ROLES,
   authEntryId,
   deleteCredential,
   effectiveRoles,
+  emptyGrants,
   formatToken,
   generateSecret,
   getCredential,
@@ -33,6 +35,7 @@ import {
   type Credential,
   type CredentialRecord,
   type GhAuthRecord,
+  type GrantRole,
   type Kind,
   type LoginAuthRecord,
   type RoleGrants,
@@ -464,7 +467,7 @@ function parseScope(value: unknown, roles: readonly Kind[]): Kind[] | undefined 
   }
   for (const role of value) {
     if (!SCOPE_ROLES.includes(role as Kind)) {
-      invalid("`scope` may only list read, publish and admin.");
+      invalid("`scope` may only list read, publish, yank, delete and admin.");
     }
     if (!roles.includes(role as Kind)) invalid(`This credential has no ${String(role)} role.`);
   }
@@ -497,45 +500,54 @@ function parseRoles(body: Record<string, unknown>): Kind[] {
   if (roles !== undefined) {
     if (kind !== undefined) invalid("Give `roles` or `kind`, not both.");
     if (!isRoleSet(roles)) {
-      invalid("`roles` must be a non-empty list of read, publish and admin.");
+      invalid("`roles` must be a non-empty list of read, publish, yank, delete and admin.");
     }
     return roles;
   }
-  if (!isKind(kind)) invalid("`kind` must be read, publish or admin.");
+  if (!isKind(kind)) invalid("`kind` must be read, publish, yank, delete or admin.");
   return [kind];
 }
 
 /**
  * The grants a request body sets for a credential holding `roles`, on top of `base`: the legacy
- * flat `grants` (only with one role) and/or `read_grants` and `publish_grants`. A role the
- * credential does not hold takes none, and `admin` has no grants of its own.
+ * flat `grants` (only with one role) and/or `read_grants`, `publish_grants`, `yank_grants` and
+ * `delete_grants`. A role the credential does not hold takes none, and `admin` has no grants of
+ * its own.
  */
 function parseRoleGrants(
   roles: readonly Kind[],
   body: Record<string, unknown>,
-  base: RoleGrants = { read: [], publish: [] },
+  base: RoleGrants = emptyGrants(),
 ): RoleGrants {
-  const next: RoleGrants = { read: [...base.read], publish: [...base.publish] };
+  const next: RoleGrants = {
+    read: [...base.read],
+    publish: [...base.publish],
+    yank: [...base.yank],
+    delete: [...base.delete],
+  };
   const check = (value: unknown) => validateGrants(value, validateRange);
   if (roles.length === 1 && roles[0] === "admin") {
-    for (const field of ["grants", "read_grants", "publish_grants"]) {
+    for (const field of ["grants", ...GRANT_ROLES.map((role) => `${role}_grants`)]) {
       if (body[field] !== undefined && check(body[field]).length > 0) {
         invalid("Admin credentials have no grants.");
       }
     }
-    return { read: [], publish: [] };
+    return emptyGrants();
   }
   if (body.grants !== undefined) {
-    if (body.read_grants !== undefined || body.publish_grants !== undefined) {
-      invalid("Give `grants` or `read_grants` and `publish_grants`, not both.");
+    if (GRANT_ROLES.some((role) => body[`${role}_grants`] !== undefined)) {
+      invalid("Give `grants` or the `<role>_grants` lists, not both.");
     }
     const [only, ...more] = roles;
     if (only === undefined || more.length > 0) {
-      invalid("`grants` needs a credential with one role: use `read_grants` and `publish_grants`.");
+      invalid(
+        "`grants` needs a credential with one role: use `read_grants`, `publish_grants`, " +
+          "`yank_grants` and `delete_grants`.",
+      );
     }
-    next[only as "read" | "publish"] = check(body.grants);
+    next[only as GrantRole] = check(body.grants);
   } else {
-    for (const role of ["read", "publish"] as const) {
+    for (const role of GRANT_ROLES) {
       const value = body[`${role}_grants`];
       if (value === undefined) continue;
       const grants = check(value);
@@ -545,7 +557,7 @@ function parseRoleGrants(
       next[role] = grants;
     }
   }
-  for (const role of ["read", "publish"] as const) {
+  for (const role of GRANT_ROLES) {
     if (!roles.includes(role)) next[role] = [];
   }
   return next;
@@ -633,14 +645,16 @@ export async function updateGrants(
   for (const field of ["project", "kind", "auth"]) {
     if (field in body) invalid(`\`${field}\` cannot be changed.`);
   }
-  const fields = ["grants", "read_grants", "publish_grants", "roles"];
+  const fields = ["grants", ...GRANT_ROLES.map((role) => `${role}_grants`), "roles"];
   if (!fields.some((field) => field in body)) {
-    invalid("`grants`, `read_grants`, `publish_grants` or `roles` is required.");
+    invalid(
+      "`grants`, `read_grants`, `publish_grants`, `yank_grants`, `delete_grants` or `roles` is required.",
+    );
   }
   let roles = record.roles;
   if (body.roles !== undefined) {
     if (!isRoleSet(body.roles)) {
-      invalid("`roles` must be a non-empty list of read, publish and admin.");
+      invalid("`roles` must be a non-empty list of read, publish, yank, delete and admin.");
     }
     if (record.roles.includes("admin") && !body.roles.includes("admin")) {
       const admins = (await listCredentials(env)).filter((r) => r.roles.includes("admin"));
@@ -869,7 +883,7 @@ export async function createFirstAdmin(
     env,
     project,
     ["admin"],
-    { read: [], publish: [] },
+    emptyGrants(),
     spec,
     now,
   );

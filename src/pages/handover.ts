@@ -9,7 +9,7 @@
  */
 
 import type { Adapter, Eco, Snippet } from "../adapters/types";
-import type { Kind } from "../core/auth";
+import { KINDS, type GrantRole, type Kind } from "../core/auth";
 import { isTransitive, type Grant } from "../core/grants";
 import { encodeQr } from "../core/qr";
 import { ECO_NAMES, day } from "./catalog";
@@ -39,14 +39,14 @@ export interface HandoverInput {
     | { kind: "login"; password: string; totp?: { secret: string; otpauthUri: string } };
   /** The roles the secret may use. */
   roles: readonly Kind[];
-  grants: { read: readonly Grant[]; publish: readonly Grant[] };
+  grants: Record<GrantRole, readonly Grant[]>;
   /** When the secret stops working, `null` for never. */
   expires: string | null;
   /** The adapter of an ecosystem that is enabled, for its client configuration. */
   adapterOf(eco: Eco): Pick<Adapter, "clientConfig"> | null;
 }
 
-const ROLE_ORDER: readonly Kind[] = ["read", "publish", "admin"];
+const ROLE_ORDER: readonly Kind[] = KINDS;
 
 /** What a grant lets, in words. */
 function describeGrant(grant: Grant): string {
@@ -162,6 +162,20 @@ export function handoverBlocks(input: HandoverInput): Block[] {
           { t: "list", items: grants.publish.map(describeGrant) },
         );
       }
+    } else if (role === "yank" || role === "delete") {
+      const verb = role === "yank" ? "yank" : "permanently delete";
+      blocks.push({ t: "h", text: `${role === "yank" ? "Yank" : "Delete"} access` });
+      if (grants[role].length === 0) {
+        blocks.push({ t: "p", text: `No packages are granted to this login for ${role} yet.` });
+      } else {
+        blocks.push(
+          {
+            t: "p",
+            text: `You can ${verb} versions of these packages with the sreg command-line tool:`,
+          },
+          { t: "list", items: grants[role].map(describeGrant) },
+        );
+      }
     } else {
       blocks.push(
         { t: "h", text: "Administrator access" },
@@ -208,7 +222,15 @@ function howToUse(input: HandoverInput, roles: readonly Kind[]): Block[] {
         text: `sreg ${ecos[0] ?? "composer"} publish --login --registry ${server}`,
       });
     }
-    if (roles.includes("read") || roles.includes("publish")) out.push({ t: "note", text: sreg });
+    for (const role of ["yank", "delete"] as const) {
+      if (!roles.includes(role)) continue;
+      out.push({
+        t: "code",
+        title: `${role === "yank" ? "Yank" : "Delete"}, signing in through the browser`,
+        text: `sreg ${role} <ecosystem> <package> <version> --login --registry ${server}`,
+      });
+    }
+    if (roles.some((role) => role !== "admin")) out.push({ t: "note", text: sreg });
     return out;
   }
 
@@ -240,6 +262,21 @@ function howToUse(input: HandoverInput, roles: readonly Kind[]): Block[] {
           (ecos.length === 0
             ? "sreg composer publish"
             : ecos.map((e) => `sreg ${e} publish`).join("\n")),
+      },
+      { t: "note", text: sreg },
+    );
+  }
+  for (const role of ["yank", "delete"] as const) {
+    if (!roles.includes(role)) continue;
+    out.push(
+      { t: "h", text: role === "yank" ? "Yanking versions" : "Deleting versions" },
+      {
+        t: "p",
+        text: `Give sreg the address and the token, then ${role} a version of a package you were granted:`,
+      },
+      {
+        t: "code",
+        text: `export REGISTRY_URL=${server}\nexport REGISTRY_TOKEN=${secret.token}\nsreg ${role} <ecosystem> <package> <version>`,
       },
       { t: "note", text: sreg },
     );

@@ -149,17 +149,29 @@ export function parseAuthorization(header: string | null, prefix = ""): ParsedTo
  * A role of a credential. A credential holds one or more of them; each secret is limited to some
  * of them with its `scope` (docs/spec.md "Credentials").
  */
-export type Kind = "read" | "publish" | "admin";
+export type Kind = "read" | "publish" | "yank" | "delete" | "admin";
 
-export const KINDS: readonly Kind[] = ["read", "publish", "admin"];
+export const KINDS: readonly Kind[] = ["read", "publish", "yank", "delete", "admin"];
 
 /** The roles a secret can be limited to: any role of its credential. */
-export const SCOPE_ROLES: readonly Kind[] = ["read", "publish", "admin"];
+export const SCOPE_ROLES: readonly Kind[] = KINDS;
+
+/** The roles that carry their own list of grants (`admin` has none). */
+export type GrantRole = "read" | "publish" | "yank" | "delete";
+
+export const GRANT_ROLES: readonly GrantRole[] = ["read", "publish", "yank", "delete"];
 
 /** The grants of a credential, one list per role (always `[]` for a role it does not hold). */
 export interface RoleGrants {
   read: Grant[];
   publish: Grant[];
+  yank: Grant[];
+  delete: Grant[];
+}
+
+/** Grants lists of a credential that holds no grants at all. */
+export function emptyGrants(): RoleGrants {
+  return { read: [], publish: [], yank: [], delete: [] };
 }
 
 /** A static secret, stored as its SHA-256. */
@@ -277,13 +289,19 @@ export interface Credential {
   grants: Grant[];
   read_grants: Grant[];
   publish_grants: Grant[];
+  yank_grants: Grant[];
+  delete_grants: Grant[];
 }
 
-/** The role the legacy `kind` field reports for a set of roles: `admin` first, then `read`. */
+/**
+ * The role the legacy `kind` field reports for a set of roles: `admin` first, then `read`,
+ * `publish`, `yank` and `delete`.
+ */
 export function primaryKind(roles: readonly Kind[]): Kind {
   if (roles.includes("admin")) return "admin";
   if (roles.includes("read")) return "read";
-  return "publish";
+  if (roles.includes("publish")) return "publish";
+  return roles.includes("yank") ? "yank" : "delete";
 }
 
 /** The grants the legacy flat `grants` field reports for a set of roles. */
@@ -293,11 +311,7 @@ export function legacyGrants(roles: readonly Kind[], grants: RoleGrants): Grant[
 }
 
 /** The grants of a role the credential holds, `[]` otherwise. */
-export function grantsFor(
-  roles: readonly Kind[],
-  grants: RoleGrants,
-  role: "read" | "publish",
-): Grant[] {
+export function grantsFor(roles: readonly Kind[], grants: RoleGrants, role: GrantRole): Grant[] {
   return roles.includes(role) ? grants[role] : [];
 }
 
@@ -352,13 +366,26 @@ function upgradeRecord(value: unknown): CredentialRecord | null {
   const { project, auth } = value;
   const entries = auth as unknown as AuthRecordEntry[];
   if (isRoleSet(value.roles) && isRecord(value.grants) && !Array.isArray(value.grants)) {
-    const { read, publish } = value.grants;
-    if (!Array.isArray(read) || !Array.isArray(publish)) return null;
+    const { read, publish, yank = [], delete: del = [] } = value.grants;
+    if (
+      !Array.isArray(read) ||
+      !Array.isArray(publish) ||
+      !Array.isArray(yank) ||
+      !Array.isArray(del)
+    ) {
+      return null;
+    }
+    // Records written before the `yank` and `delete` roles have no such lists: they read as `[]`.
     return {
       project,
       roles: value.roles,
       auth: entries,
-      grants: { read: read as Grant[], publish: publish as Grant[] },
+      grants: {
+        read: read as Grant[],
+        publish: publish as Grant[],
+        yank: yank as Grant[],
+        delete: del as Grant[],
+      },
     };
   }
   const kind = value.kind;
@@ -371,6 +398,8 @@ function upgradeRecord(value: unknown): CredentialRecord | null {
     grants: {
       read: kind === "read" ? grants : [],
       publish: kind === "publish" ? grants : [],
+      yank: [],
+      delete: [],
     },
   };
 }
@@ -392,7 +421,12 @@ function toCredentialRecord(value: unknown, project: string): CredentialRecord |
   if (record === null || record.project !== project) return null;
   // Records written before grants carried `transitive` read as `transitive: true`.
   const normalize = (list: Grant[]) => list.map((g) => (isRecord(g) ? normalizeGrant(g) : g));
-  const grants = { read: normalize(record.grants.read), publish: normalize(record.grants.publish) };
+  const grants = {
+    read: normalize(record.grants.read),
+    publish: normalize(record.grants.publish),
+    yank: normalize(record.grants.yank),
+    delete: normalize(record.grants.delete),
+  };
   return { ...record, grants };
 }
 
@@ -569,6 +603,8 @@ export async function toCredential(record: CredentialRecord): Promise<Credential
     grants: legacyGrants(record.roles, record.grants),
     read_grants: grantsFor(record.roles, record.grants, "read"),
     publish_grants: grantsFor(record.roles, record.grants, "publish"),
+    yank_grants: grantsFor(record.roles, record.grants, "yank"),
+    delete_grants: grantsFor(record.roles, record.grants, "delete"),
   };
 }
 
@@ -863,18 +899,24 @@ export async function verifyLoginToken(
   if (parsedScopes === null) return null;
   const parsedOps = ops === undefined ? undefined : toAdminOps(ops);
   if (parsedOps === null) return null;
-  // A publish token names its operations and carries the `publish` role, an admin token names
-  // its operations and carries `admin`, a pull token names none and carries `read`: the
-  // credential must hold the role and the `login` secret's scope must include it.
-  const role: Kind =
-    parsedOps !== undefined ? "admin" : parsedScopes === undefined ? "read" : "publish";
-  if (!record.roles.includes(role)) return null;
+  // A publish token names its operations and carries the `publish` role, a pull token names
+  // none and carries `read`. An admin token (yank, delete) names its operations and carries
+  // `admin`, or, for a credential without it, the `yank` and/or `delete` roles its operations
+  // need: the credential must hold the roles and the `login` secret's scope must include them.
   for (const login of activeLogins(record, now)) {
     if ((await authEntryId(login)) === entry) {
-      if (!effectiveRoles(record, login).includes(role)) return null;
+      const held = effectiveRoles(record, login);
+      let roles: Kind[];
+      if (parsedOps !== undefined) {
+        roles = held.includes("admin") ? ["admin"] : [...new Set(parsedOps.map((o) => o.op))];
+        if (!roles.every((role) => held.includes(role))) return null;
+      } else {
+        roles = [parsedScopes === undefined ? "read" : "publish"];
+        if (!held.includes(roles[0] as Kind)) return null;
+      }
       return {
         entryId: entry,
-        roles: [role],
+        roles,
         ...(parsedScopes === undefined ? {} : { scopes: parsedScopes }),
         ...(parsedOps === undefined ? {} : { ops: parsedOps }),
       };
@@ -1171,6 +1213,11 @@ export function matchesGhEntry(entry: GhAuthRecord, claims: GithubClaims): boole
   return isAny(entry.workflow) || entry.workflow === workflowPath(claims);
 }
 
+/** The roles a hint names: one, or any of several (a route open to `admin` and `yank`). */
+function hintKinds(hint: KindHint): readonly Kind[] {
+  return typeof hint === "string" ? [hint] : hint;
+}
+
 /**
  * The first active `gh` entry of a record that matches the claims. With a `role`, an entry
  * whose scope covers it wins over an earlier one that does not; `strict` drops the others.
@@ -1179,7 +1226,7 @@ function matchingGhEntry(
   record: CredentialRecord,
   claims: GithubClaims,
   now: number,
-  role?: Kind,
+  role?: KindHint,
   strict = false,
 ): GhAuthRecord | null {
   const matches = record.auth.filter(
@@ -1189,8 +1236,11 @@ function matchingGhEntry(
       effectiveRoles(record, e).length > 0 &&
       matchesGhEntry(e, claims),
   );
+  const wanted = role === undefined ? [] : hintKinds(role);
   const covering =
-    role === undefined ? undefined : matches.find((e) => effectiveRoles(record, e).includes(role));
+    role === undefined
+      ? undefined
+      : matches.find((e) => effectiveRoles(record, e).some((r) => wanted.includes(r)));
   return covering ?? (strict ? null : (matches[0] ?? null));
 }
 
@@ -1276,7 +1326,7 @@ export const AMBIGUOUS_GH_LOGIN =
  * The kind a `_` login resolves to: `publish` for `/api/v1/publish/*`, `admin` for routes that
  * need the `admin` role alone (package administration, credentials, …), otherwise `read`.
  */
-export type KindHint = "read" | "publish" | "admin";
+export type KindHint = Kind | readonly Kind[];
 
 /**
  * Resolves `_:gh.<jwt>` (docs/api.md 2.5): verifies the JWT, takes the candidates from the
@@ -1300,7 +1350,7 @@ export async function resolveGhLogin(
   );
   const matches: { record: CredentialRecord; entry: GhAuthRecord }[] = [];
   for (const record of records) {
-    if (record === null || !record.roles.includes(kind)) continue;
+    if (record === null || !record.roles.some((role) => hintKinds(kind).includes(role))) continue;
     const entry = matchingGhEntry(record, claims, now, kind, true);
     if (entry !== null) matches.push({ record, entry });
   }
@@ -1345,7 +1395,7 @@ export interface CredentialSource {
     project: string,
     type: SecretType,
     secret: string,
-    role?: Kind,
+    role?: KindHint,
   ): Promise<ResolvedCredential | null>;
 }
 
@@ -1363,7 +1413,7 @@ export class KvSource implements CredentialSource {
     project: string,
     type: SecretType,
     secret: string,
-    role?: Kind,
+    role?: KindHint,
   ): Promise<ResolvedCredential | null> {
     const record = await getCredential(this.env, project, { now: this.deps.now?.() });
     if (record === null) return null;

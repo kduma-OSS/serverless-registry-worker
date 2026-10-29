@@ -372,3 +372,26 @@ ${content}
     { page: "packages" },
   );
 }
+
+/**
+ * The home of a `yank` or `delete` credential without `read`: the packages its grants cover,
+ * each linking to the package page where its versions can be yanked or deleted.
+ */
+export function managePage(ctx: PageContext, packages: readonly PackageSummary[]): string {
+  const content =
+    packages.length === 0
+      ? markup`<div class="pkg-empty">
+<p>${NO_PACKAGES}</p>
+<p class="hint">Ask an administrator for access.</p>
+</div>`
+      : packageList(packages, "Open a package to yank or delete its versions.");
+  return layout(
+    ctx,
+    "Packages",
+    markup`<div class="catalog">
+<h1>Packages you can manage</h1>
+${content}
+</div>`,
+    { page: "packages" },
+  );
+}

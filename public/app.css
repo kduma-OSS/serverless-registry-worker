@@ -439,7 +439,7 @@ th {
 }
 
 /* `transitive` only applies to read grants. */
-[data-grant-kind="publish"] [data-transitive] {
+[data-grant-kind]:not([data-grant-kind="read"]) [data-transitive] {
   display: none;
 }
 

@@ -198,20 +198,34 @@ do not need that header. The CLI never uses cookies.
 
 ### 2.4 Credential roles
 
-A credential has one or more roles: any non-empty combination of `read`, `publish` and
-`admin`. `read` and `publish` each have their own list of grants; `admin` has none of its own. Every secret (an auth entry) has a `scope`, the roles it may use,
+A credential has one or more roles: any non-empty combination of `read`, `publish`, `yank`,
+`delete` and `admin`. `read`, `publish`, `yank` and `delete` each have their own list of grants;
+`admin` has none of its own. Every secret (an auth entry) has a `scope`, the roles it may use,
 a non-empty subset of the credential's roles. A request uses the roles of the credential
 within the scope of the secret that authenticated it:
 
-| Role      | May call                                                                                     |
-| --------- | -------------------------------------------------------------------------------------------- |
-| `read`    | `whoami`, package listing and generic feed (filtered by its `read` grants)                   |
-| `publish` | `whoami`, `publish/init`, `publish/commit` (within its `publish` grants)                     |
-| `admin`   | `whoami`, package listing and generic feed (unfiltered), package administration, credentials |
+| Role      | May call                                                                                                                                                                            |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read`    | `whoami`, package listing and generic feed (filtered by its `read` grants)                                                                                                          |
+| `publish` | `whoami`, `publish/init`, `publish/commit` (within its `publish` grants)                                                                                                            |
+| `yank`    | `whoami`, package listing (filtered by its `yank` grants), `yank` of the versions its `yank` grants cover                                                                           |
+| `delete`  | `whoami`, package listing (filtered by its `delete` grants), `delete` of the versions its `delete` grants cover; a whole package only with a grant for all versions (`versions: *`) |
+| `admin`   | `whoami`, package listing and generic feed (unfiltered), package administration (yank and delete anywhere, reindex), credentials                                                    |
 
-A login token approved for a yank or delete (2.6) carries the `admin` role but only the
-operations it names: it may call `whoami` and those yank and delete routes and nothing else
-(the table above does not apply to it).
+`yank` and `delete` let an account clean up packages without being an administrator: they
+reach none of the credential, reindex or bucket routes, cannot install or publish, and their
+package listing never has `dependencies`. An `admin` may yank and delete anywhere, whatever the
+grants say. A `yank`/`delete` secret is a `key`, a `gh` entry (for a job that yanks, see 2.5) or a
+`login` (2.6). A `login` that has a `yank` or `delete` role in its scope signs in to the panel: a
+session started with it carries those roles (never `publish`), so the panel's "Yank" and
+"Delete" buttons, which call this API, work within the grants. Without `read` the panel shows
+only the packages the grants cover, their versions with those buttons and "Delete package"
+(with a grant for all versions), and no version pages, downloads, configuration or `/admin/*`.
+
+A login token approved for a yank or delete (2.6) carries the `admin` role, or for a credential
+that holds `yank` and/or `delete` instead of it, those roles, but only the operations it
+names: it may call `whoami` and those yank and delete routes and nothing else (the table above
+does not apply to it).
 
 Any role may hold `key` and `gh` entries; a `publish` credential usually has `gh` entries and
 may also have `key` entries (for publishing from outside GitHub Actions). Any credential may also
@@ -272,12 +286,15 @@ With the reserved login, `_:gh.<jwt>`, the Worker resolves the project from the 
 3. Load every candidate's record and keep the ones with a matching active `gh` entry.
 4. Keep only the credentials that hold the role the request needs, through a matching entry
    whose `scope` includes it: `publish` for `/api/v1/publish/*`, `admin` for the routes that
-   need the `admin` role alone (yank, delete and reindex of packages, credentials and their
-   secrets, the GitHub repository lookup and bucket accept), `read` for every other
+   need the `admin` role alone (reindex of packages, credentials and their secrets, the GitHub
+   repository lookup and bucket accept), `admin` or `yank` for a yank and `admin` or `delete`
+   for a delete (the credential's `yank` / `delete` grants are then checked as for a key),
+   `read` for every other
    authenticated route (including `whoami`, the package listing, the generic and NuGet feeds
    and a panel login). So `sreg yank --oidc` and `sreg delete --oidc` need no `--project`
-   when exactly one `admin` credential has a matching `gh` entry; `<project>:gh.<jwt>` works
-   for an `admin`-scoped `gh` entry on the same routes.
+   when exactly one credential with the `admin` (or `yank` / `delete`) role has a matching `gh`
+   entry; `<project>:gh.<jwt>` works for an `admin`-, `yank`- or `delete`-scoped `gh` entry on
+   the same routes.
 5. Exactly one left → that is the identity. None → `401 unauthorized`. More than one →
    `401 unauthorized` with the message
    "more than one project matches this token; use <project>:gh.<jwt>".
@@ -300,11 +317,14 @@ token** (`type` `st`, 2.1) for the credential the entry belongs to. The token ca
 role and the grants of that role: a pull login issues a `read` token and a publish login a
 `publish` token, and the credential must hold that role with the `login`'s `scope` including it
 (a credential with both roles can issue both kinds; a `login` scoped to `read` only issues pull
-tokens). A yank or delete login issues an `admin` token limited to the operations it names (a
-credential with the `admin` role and a `login` whose scope includes `admin`). A `login` whose
-scope has no `read` or `publish` (an `admin` only login) signs in to the panel and approves
+tokens). A yank or delete login issues a token limited to the operations it names: an `admin`
+token (a credential with the `admin` role and a `login` whose scope includes `admin`) or, for
+a credential without `admin`, a `yank` / `delete` token (the credential holds that role, the
+`login`'s scope includes it, and its grants of that role cover **every** operation, 5.1). A
+`login` whose scope has no `read` or `publish` (an `admin`, `yank` or `delete` login) approves
 yank and delete logins; it never issues a pull, a publish or a general administration token
-(the approval page of those does not accept it).
+(the approval page of those does not accept it). A `yank` or `delete` only `login` signs in
+to the panel (2.4).
 
 The flow (the CLI does it for `sreg login`, `sreg auth <ecosystem> --login`, `sreg generic get
 --login`, `sreg <ecosystem> publish --login`, `sreg yank --login` and `sreg delete --login`):
@@ -335,8 +355,11 @@ exp }`, valid 5 minutes, `HttpOnly; Secure; SameSite=Lax`, limited to the path o
    a checkbox "extended validity". A **yank** or **delete** is shown with every package
    version (a delete may be a whole package, shown as such, with a warning that deleting
    cannot be undone) and is approved only when the credential has the `admin` role (within the
-   login's scope); there are no grants to check. It needs the same fresh one-time code as a
-   publish. The sign-in on this page accepts an `admin`-only login only for a yank or delete.
+   login's scope), or the `yank` (for a yank) / `delete` (for a delete) role and grants of that
+   role that cover **each** version (a whole package needs a grant with `versions: *`);
+   otherwise the page offers no approval. The same checks run again on the approval request.
+   It needs the same fresh one-time code as a publish. The sign-in on this page accepts a login
+   with only `admin`, `yank` or `delete` for a yank or delete, and not for a pull or a publish.
 4. On approval the Worker issues the token and stores it at `login-session:<nonce>` for the
    rest of the session's life (at most 10 minutes). The client polls `POST
 /api/v1/auth/sessions/poll` (6.21) until it receives the token, which is then deleted.
@@ -348,7 +371,8 @@ answer `403 forbidden` for anything else, and `whoami` (6.3) returns the scopes.
 
 An admin token carries `ops`, the approved operations, `{ "op": "yank" | "delete", "eco",
 "package", "version"? }` (at most `MAX_PUBLISH_SCOPES`); `version` is absent for the deletion
-of a whole package. It carries the `admin` role and may call only:
+of a whole package. It carries the `admin` role (for a credential without it: the `yank` and/or
+`delete` role its operations need) and may call only:
 `POST /api/v1/packages/<eco>/<name>/<version>/yank` for a version in a `yank` operation,
 `DELETE /api/v1/packages/<eco>/<name>/<version>` for a version in a `delete` operation,
 `DELETE /api/v1/packages/<eco>/<name>` for a `delete` operation without `version`, and `GET
@@ -438,8 +462,8 @@ always present but may be `null`.
 
 ```ts
 type Eco = "composer" | "npm" | "cargo" | "generic" | "nuget" | "swift" | "maven";
-type Kind = "read" | "publish" | "admin"; // a role of a credential
-type Role = "read" | "publish"; // the roles that can be held together, and that scope a secret
+type Kind = "read" | "publish" | "yank" | "delete" | "admin"; // a role of a credential
+type Role = "read" | "publish" | "yank" | "delete"; // the roles that carry grants
 
 interface Grant {
   eco: Eco;
@@ -486,11 +510,13 @@ type AuthEntry = KeyAuthEntry | GhAuthEntry | LoginAuthEntry;
 
 interface Credential {
   project: string; // local slug
-  roles: Kind[]; // a non-empty subset of ["read", "publish", "admin"]
+  roles: Kind[]; // a non-empty subset of ["read", "publish", "yank", "delete", "admin"]
   auth: AuthEntry[]; // includes expired entries until the hourly cron removes them
   read_grants: Grant[]; // [] without the "read" role
   publish_grants: Grant[]; // [] without the "publish" role
-  /** Deprecated, kept for clients written before roles: "admin" when the credential holds it, else "read" when it holds that, else "publish". */
+  yank_grants: Grant[]; // [] without the "yank" role
+  delete_grants: Grant[]; // [] without the "delete" role
+  /** Deprecated, kept for clients written before roles: "admin" when the credential holds it, else "read", "publish", "yank" or "delete" (in that order). */
   kind: Kind;
   /** Deprecated: the grants of `kind` ([] for "admin"). */
   grants: Grant[];
@@ -563,11 +589,14 @@ the generic feed (section 8) are derived from it. Clients must treat an absent `
   `400 invalid_request`.
 - `transitive` (optional boolean, default `true`): for `read`, the grant also opens the
   package's dependencies in this registry (5.3). It is accepted on input for every role,
-  ignored for `publish` (publishing always needs an explicit grant) and meaningless for
-  `admin`, which has no grants. The Worker stores it explicitly (`true` when it was absent)
+  ignored for `publish`, `yank` and `delete` (those always need an explicit grant) and
+  meaningless for `admin`, which has no grants. The Worker stores it explicitly (`true` when it was absent)
   and always returns it, in the credentials API as well as in `whoami`.
 - A credential without a grant for an ecosystem has no access to it. For `read` a grant means
-  "may install", for `publish` "may publish".
+  "may install", for `publish` "may publish", for `yank` "may yank" and for `delete` "may
+  delete" the versions it covers (`versions`, as for the other roles). Deleting a whole package
+  (6.10) needs a `delete` grant for the package with `versions` `*`, because a narrower
+  constraint would not cover versions published later; an `admin` needs no grant.
 
 Shorthand: `eco:package[:versions[:transitive]]`, split at the first two `:` (for maven,
 whose package names contain one `:`, at the first three); `versions` defaults to `*`. When the
@@ -655,30 +684,30 @@ packages depend on, as long as they are in this registry:
 
 ## 6. Endpoints
 
-| Method | Path                                                  | Role            | Section |
-| ------ | ----------------------------------------------------- | --------------- | ------- |
-| GET    | `/api/v1/version`                                     | none            | 6.2     |
-| GET    | `/api/v1/whoami`                                      | any             | 6.3     |
-| POST   | `/api/v1/publish/init`                                | `publish`       | 6.4     |
-| POST   | `/api/v1/publish/commit`                              | `publish`       | 6.5     |
-| GET    | `/api/v1/packages`                                    | `read`, `admin` | 6.6     |
-| GET    | `/api/v1/packages/<eco>/<name>`                       | `read`, `admin` | 6.7     |
-| POST   | `/api/v1/packages/<eco>/<name>/<version>/yank`        | `admin`         | 6.8     |
-| DELETE | `/api/v1/packages/<eco>/<name>/<version>`             | `admin`         | 6.9     |
-| DELETE | `/api/v1/packages/<eco>/<name>`                       | `admin`         | 6.10    |
-| POST   | `/api/v1/packages/<eco>/<name>/reindex`               | `admin`         | 6.11    |
-| GET    | `/api/v1/credentials`                                 | `admin`         | 6.12    |
-| POST   | `/api/v1/credentials`                                 | `admin`         | 6.13    |
-| GET    | `/api/v1/credentials/<project>`                       | `admin`         | 6.14    |
-| PATCH  | `/api/v1/credentials/<project>`                       | `admin`         | 6.15    |
-| DELETE | `/api/v1/credentials/<project>`                       | `admin`         | 6.16    |
-| POST   | `/api/v1/auth/sessions`                               | none            | 6.20    |
-| POST   | `/api/v1/auth/sessions/poll`                          | none            | 6.21    |
-| POST   | `/api/v1/credentials/<project>/secrets`               | `admin`         | 6.17    |
-| PATCH  | `/api/v1/credentials/<project>/secrets/<hash-prefix>` | `admin`         | 6.22    |
-| DELETE | `/api/v1/credentials/<project>/secrets/<hash-prefix>` | `admin`         | 6.18    |
-| GET    | `/api/v1/github/repository?name=<owner/repo>`         | `admin`         | 6.19    |
-| POST   | `/api/v1/bucket/accept`                               | `admin`         | 6.23    |
+| Method | Path                                                  | Role                              | Section |
+| ------ | ----------------------------------------------------- | --------------------------------- | ------- |
+| GET    | `/api/v1/version`                                     | none                              | 6.2     |
+| GET    | `/api/v1/whoami`                                      | any                               | 6.3     |
+| POST   | `/api/v1/publish/init`                                | `publish`                         | 6.4     |
+| POST   | `/api/v1/publish/commit`                              | `publish`                         | 6.5     |
+| GET    | `/api/v1/packages`                                    | `read`, `yank`, `delete`, `admin` | 6.6     |
+| GET    | `/api/v1/packages/<eco>/<name>`                       | `read`, `yank`, `delete`, `admin` | 6.7     |
+| POST   | `/api/v1/packages/<eco>/<name>/<version>/yank`        | `yank`, `admin`                   | 6.8     |
+| DELETE | `/api/v1/packages/<eco>/<name>/<version>`             | `delete`, `admin`                 | 6.9     |
+| DELETE | `/api/v1/packages/<eco>/<name>`                       | `delete`, `admin`                 | 6.10    |
+| POST   | `/api/v1/packages/<eco>/<name>/reindex`               | `admin`                           | 6.11    |
+| GET    | `/api/v1/credentials`                                 | `admin`                           | 6.12    |
+| POST   | `/api/v1/credentials`                                 | `admin`                           | 6.13    |
+| GET    | `/api/v1/credentials/<project>`                       | `admin`                           | 6.14    |
+| PATCH  | `/api/v1/credentials/<project>`                       | `admin`                           | 6.15    |
+| DELETE | `/api/v1/credentials/<project>`                       | `admin`                           | 6.16    |
+| POST   | `/api/v1/auth/sessions`                               | none                              | 6.20    |
+| POST   | `/api/v1/auth/sessions/poll`                          | none                              | 6.21    |
+| POST   | `/api/v1/credentials/<project>/secrets`               | `admin`                           | 6.17    |
+| PATCH  | `/api/v1/credentials/<project>/secrets/<hash-prefix>` | `admin`                           | 6.22    |
+| DELETE | `/api/v1/credentials/<project>/secrets/<hash-prefix>` | `admin`                           | 6.18    |
+| GET    | `/api/v1/github/repository?name=<owner/repo>`         | `admin`                           | 6.19    |
+| POST   | `/api/v1/bucket/accept`                               | `admin`                           | 6.23    |
 
 ### 6.1 Auth entry identifiers
 
@@ -722,15 +751,16 @@ Any role. Response `200`:
 
 `roles` are the roles this token may use: the credential's roles within the scope of the secret
 that authenticated the request. `access` has one list of grants per such role (`read`,
-`publish`); it has no key for a role the token may not use, and is `{}` for a token that has
-only `admin`. `kind` and `grants` are the legacy view: `admin` and `[]` when the token may
-administer, otherwise `read` and its grants when it may read, otherwise `publish` and its
-grants.
+`publish`, `yank`, `delete`); it has no key for a role the token may not use, and is `{}` for a
+token that has only `admin`. `kind` and `grants` are the legacy view: `admin` and `[]` when the
+token may administer, otherwise `read` and its grants when it may read, otherwise `publish`,
+`yank` or `delete` (in that order) and its grants.
 
 A publish login token (2.6) adds `"scopes": [{ "eco", "package", "version" }]`, the only
 versions it may publish. A yank or delete login token adds `"ops": [{ "op", "eco", "package",
-"version"? }]`, the only operations it may perform; its `roles` are `["admin"]`, `access` is `{}`
-and the legacy `kind` is `admin` with `grants` `[]`.
+"version"? }]`, the only operations it may perform; its `roles` are `["admin"]` (or the `yank` /
+`delete` roles of a credential without `admin`), `access` is `{}` and the legacy `kind` is
+`admin` with `grants` `[]`.
 
 `project` is `[<source>.]<project>` (e.g. `okta.shop-frontend` for a provider-backed
 credential); for an `_:gh.<jwt>` token it is the resolved project name, never `_` (2.5). Grants are returned as stored, with `transitive`; they are `[]` for `admin`.
@@ -1141,7 +1171,9 @@ to `commit` can therefore simply retry it.
 
 ### 6.6 `GET /api/v1/packages`
 
-Role `read` or `admin`. Lists packages with their versions. For `read`, the top-level entries
+Role `read`, `yank`, `delete` or `admin`. Lists packages with their versions. A `yank` or `delete`
+credential sees the versions its own grants cover (never `dependencies`, and its `read` grants do
+not count); it needs this to find what to yank or delete. For `read`, the top-level entries
 are the packages of the credential's explicit grants with the versions those grants cover;
 packages with no such version are omitted. Packages reachable only transitively (5.3) are not
 top-level entries: instead every `read` entry carries `dependencies`, the packages and
@@ -1221,7 +1253,7 @@ is the stored (lower-case) name.
 
 ### 6.7 `GET /api/v1/packages/<eco>/<name>`
 
-Role `read` or `admin`. Response `200`: one `Package` object (same filtering and
+Role `read`, `yank`, `delete` or `admin`. Response `200`: one `Package` object (same filtering and
 `dependencies` as 6.6), e.g.
 `GET /api/v1/packages/npm/%40acme%2Fsdk`:
 
@@ -1246,7 +1278,8 @@ is covered by an explicit grant (a package reachable only transitively is listed
 
 ### 6.8 `POST /api/v1/packages/<eco>/<name>/<version>/yank`
 
-Role `admin`. No body. Marks the version as yanked: it disappears from the composer and npm
+Role `yank` (within its `yank` grants, 5.1) or `admin`. No body. A `yank` credential outside its
+grants gets `403 forbidden`. Marks the version as yanked: it disappears from the composer and npm
 indexes, is listed with `yanked: true` in the cargo index, is left out of the generic feed
 unless `?include=yanked` (section 8) and gets `listed: false` in the NuGet registration while
 the flat container keeps it (section 9). For swift it carries a `problem` in the release list
@@ -1272,7 +1305,8 @@ Errors: `404 not_found` (package or version).
 
 ### 6.9 `DELETE /api/v1/packages/<eco>/<name>/<version>`
 
-Role `admin`. No body. Deletes the manifest and all files of the version and rebuilds the
+Role `delete` (within its `delete` grants, 5.1) or `admin`; `403 forbidden` outside the grants.
+No body. Deletes the manifest and all files of the version and rebuilds the
 index; consumers' lockfiles that point at it stop working, and the version can be published
 again. Dist-tags move as for yank.
 
@@ -1286,7 +1320,8 @@ Errors: `404 not_found`.
 
 ### 6.10 `DELETE /api/v1/packages/<eco>/<name>`
 
-Role `admin`. No body. Deletes every version, the package's indexes and its entry in
+Role `delete` (with a `delete` grant for the package that covers all versions, `versions: *`,
+5.1) or `admin`; `403 forbidden` otherwise. No body. Deletes every version, the package's indexes and its entry in
 `_meta/packages.json`. Confirmation (typing the name) is the client's responsibility.
 
 Response `200`:
@@ -1365,14 +1400,16 @@ Response `200`:
         { "eco": "npm", "package": "@acme/sdk", "versions": "^2.0", "transitive": false },
         { "eco": "cargo", "package": "acme-core", "versions": ">=1.4, <2", "transitive": true }
       ],
-      "publish_grants": []
+      "publish_grants": [],
+      "yank_grants": [],
+      "delete_grants": []
     }
   ]
 }
 ```
 
 `kind` and `grants` are the legacy view (2.4, section 5): `roles`, `read_grants`,
-`publish_grants` and each entry's `scope` are authoritative.
+`publish_grants`, `yank_grants`, `delete_grants` and each entry's `scope` are authoritative.
 
 ### 6.13 `POST /api/v1/credentials`
 
@@ -1383,11 +1420,13 @@ Request:
 | Field            | Type     | Required | Description                                                                                                                                                                                                                                       |
 | ---------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `project`        | string   | yes      | slug `[a-z0-9][a-z0-9-]{1,62}`                                                                                                                                                                                                                    |
-| `roles`          | string[] | yes\*    | a non-empty list of `read`, `publish` and `admin`                                                                                                                                                                                                 |
-| `kind`           | string   | yes\*    | legacy form of `roles` with one role: `read`, `publish` or `admin`; not together with `roles`                                                                                                                                                     |
+| `roles`          | string[] | yes\*    | a non-empty list of `read`, `publish`, `yank`, `delete` and `admin`                                                                                                                                                                               |
+| `kind`           | string   | yes\*    | legacy form of `roles` with one role: `read`, `publish`, `yank`, `delete` or `admin`; not together with `roles`                                                                                                                                   |
 | `read_grants`    | Grant[]  | no       | default `[]`; must be empty or absent without the `read` role                                                                                                                                                                                     |
+| `yank_grants`    | Grant[]  | no       | default `[]`; must be empty or absent without the `yank` role                                                                                                                                                                                     |
+| `delete_grants`  | Grant[]  | no       | default `[]`; must be empty or absent without the `delete` role                                                                                                                                                                                   |
 | `publish_grants` | Grant[]  | no       | default `[]`; must be empty or absent without the `publish` role                                                                                                                                                                                  |
-| `grants`         | Grant[]  | no       | legacy form: the grants of a credential with one role; `400` for two roles, and not together with `read_grants` or `publish_grants`; empty or absent for `admin`                                                                                  |
+| `grants`         | Grant[]  | no       | legacy form: the grants of a credential with one role; `400` for two roles, and not together with any of the `<role>_grants`; empty or absent for `admin`                                                                                         |
 | `secret`         | object   | no       | the first auth entry, same shape as the body of 6.17 (`scope` required with several roles); default `{ "type": "key" }`; `null` creates the credential **without** a secret (not for a credential that holds `admin`, which needs one to sign in) |
 
 \* One of `roles` and `kind`.
@@ -1429,7 +1468,9 @@ Response `201`:
     "read_grants": [
       { "eco": "composer", "package": "acme/*", "versions": "*", "transitive": true }
     ],
-    "publish_grants": []
+    "publish_grants": [],
+    "yank_grants": [],
+    "delete_grants": []
   },
   "token": "shop-frontend:k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e"
 }
@@ -1457,10 +1498,10 @@ Request (at least one of the fields):
 }
 ```
 
-`read_grants` and `publish_grants` each replace that role's whole list (`[]` removes all
+`read_grants`, `publish_grants`, `yank_grants` and `delete_grants` each replace that role's whole list (`[]` removes all
 access); a list for a role the credential does not hold (after `roles` is applied) must be
 empty. The legacy `grants` replaces the list of a credential with one role, and is
-`400 invalid_request` for two roles or together with `read_grants` or `publish_grants`.
+`400 invalid_request` for two roles or together with any of the `<role>_grants`.
 `roles` may add or remove any role, `admin` included, so an `admin` credential can be given
 `read` or `publish` and a `read` credential can become an administrator; the last credential
 that holds `admin` cannot lose it (`403 forbidden`). A removed role loses its grants. Existing

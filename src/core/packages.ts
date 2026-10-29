@@ -1,7 +1,8 @@
 /**
  * Package listing for the home page, the panel and the CLI (docs/api.md 6.6–6.7). `read`
  * credentials see only the versions their explicit grants cover, and under each package the
- * dependencies its grant opens transitively (5.3); `admin` sees everything; `publish`
+ * dependencies its grant opens transitively (5.3); `yank` and `delete` credentials see the
+ * versions their own grants cover (no dependencies); `admin` sees everything; `publish`
  * credentials may not list packages.
  */
 
@@ -18,7 +19,7 @@ import {
   type VersionRef,
 } from "./closure";
 import { ValidationError } from "./errors";
-import { isAllowed, isPackageAllowed } from "./grants";
+import { isAllowed, isPackageAllowed, type Grant } from "./grants";
 import { listManifests, listVersionNames, readManifest, readPackagesMeta } from "./storage";
 
 export type PackagesEnv = Pick<Env, "R2_BUCKET" | "ECOSYSTEMS">;
@@ -56,9 +57,20 @@ function byteOrder(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/**
+ * The grants that make a version visible in a listing: the `read` grants, and for the `yank` and
+ * `delete` roles their own grants, so that they see what they may clean up (no dependencies).
+ * Only roles the caller may use count: a secret scoped to `yank` does not see by `read` grants.
+ */
+function listingGrants(identity: Identity): Grant[] {
+  return (["read", "yank", "delete"] as const).flatMap((role) =>
+    hasRole(identity, role) ? identity.grants[role] : [],
+  );
+}
+
 /** Whether the caller may see the package at all (any version). */
 function mayList(identity: Identity, eco: Eco, name: string): boolean {
-  return hasRole(identity, "admin") || isPackageAllowed(identity.grants.read, eco, name);
+  return hasRole(identity, "admin") || isPackageAllowed(listingGrants(identity), eco, name);
 }
 
 /** The manifests of a package the caller may see, lowest version first; yanked ones included. */
@@ -70,7 +82,7 @@ function visibleManifests(
   return manifests.filter(
     (m) =>
       hasRole(identity, "admin") ||
-      isAllowed(identity.grants.read, adapter.eco, m.name, m.version, adapter.satisfies),
+      isAllowed(listingGrants(identity), adapter.eco, m.name, m.version, adapter.satisfies),
   );
 }
 
@@ -169,7 +181,7 @@ export async function listPackages(
   env: PackagesEnv,
   identity: Identity,
 ): Promise<{ packages: PackageView[] }> {
-  requireRole(identity, "read", "admin");
+  requireRole(identity, "read", "admin", "yank", "delete");
   const meta = await readPackagesMeta(env);
   const adapters = enabledAdapters(env).sort((a, b) => byteOrder(a.eco, b.eco));
   const packages: PackageView[] = [];
@@ -198,7 +210,7 @@ export async function getPackage(
   eco: string,
   name: string,
 ): Promise<PackageView> {
-  requireRole(identity, "read", "admin");
+  requireRole(identity, "read", "admin", "yank", "delete");
   const notFound = new ValidationError("not_found", "Package not found.");
   const adapter = getAdapter(env, eco);
   if (adapter === null) throw notFound;
@@ -225,7 +237,7 @@ export async function listPackageSummaries(
   env: PackagesEnv,
   identity: Identity,
 ): Promise<PackageSummary[]> {
-  requireRole(identity, "read", "admin");
+  requireRole(identity, "read", "admin", "yank", "delete");
   const meta = await readPackagesMeta(env);
   const admin = hasRole(identity, "admin");
   const summaries: PackageSummary[] = [];
@@ -243,7 +255,7 @@ export async function listPackageSummaries(
         const versions = admin
           ? [...all]
           : all.filter((version) =>
-              isAllowed(identity.grants.read, adapter.eco, name, version, adapter.satisfies),
+              isAllowed(listingGrants(identity), adapter.eco, name, version, adapter.satisfies),
             );
         const top = versions[versions.length - 1];
         if (top === undefined) return null;

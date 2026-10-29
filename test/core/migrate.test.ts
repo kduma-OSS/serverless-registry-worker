@@ -291,7 +291,7 @@ describe("migration 4", () => {
       project: "m4-read",
       roles: ["read"],
       auth: [key],
-      grants: { read: grants, publish: [] },
+      grants: { read: grants, publish: [], yank: [], delete: [] },
     });
     expect(await stored("m4-pub")).toMatchObject({
       roles: ["publish"],

@@ -39,7 +39,6 @@ import {
   sessionIdentity,
   sessionValueFrom,
   type Authentication,
-  type AuthRecordEntry,
   type Kind,
   type CredentialRecord,
   type Identity,
@@ -89,7 +88,8 @@ import {
   writeGroups,
   type PackageGroups,
 } from "./core/groups";
-import { listPackageSummaries, type PackageSummary } from "./core/packages";
+import { mayModify } from "./core/modify";
+import { listPackageSummaries, type PackageSummary, type PackageView } from "./core/packages";
 import { checkLatestRelease, releaseForHeader, updateStatus, updatesEnabled } from "./core/updates";
 import type { Env } from "./env";
 import { adminPackagesPage, credentialHref } from "./pages/admin";
@@ -100,7 +100,7 @@ import {
   authorizeDonePage,
   authorizeSignInPage,
 } from "./pages/authorize";
-import { consumerPage } from "./pages/consumer";
+import { consumerPage, managePage } from "./pages/consumer";
 import { MIN_PASSWORD_LENGTH } from "./pages/components";
 import {
   credentialPage,
@@ -122,7 +122,7 @@ import type { HandoverInput } from "./pages/handover";
 import { loginCodePage, loginPage, type LoginMode } from "./pages/login";
 import { messagePage } from "./pages/message";
 import { packageHref } from "./pages/catalog";
-import { packagePage } from "./pages/package";
+import { packagePage, type PackageActions } from "./pages/package";
 import { publishPage } from "./pages/publish";
 import { settingsPage, type AdminSettings, type Setting } from "./pages/settings";
 import { setupPage } from "./pages/setup";
@@ -303,6 +303,9 @@ async function renderHome(r: PanelRequest, identity: Identity): Promise<Response
     ]);
     return htmlResponse(consumerPage(ctx, packages, groups));
   }
+  if (hasRole(identity, "yank", "delete")) {
+    return htmlResponse(managePage(ctx, await listPackageSummaries(r.env, identity)));
+  }
   return htmlResponse(publishPage(ctx));
 }
 
@@ -352,41 +355,81 @@ function notFoundPage(ctx: PageContext): Response {
  */
 function packageRoute(
   handler: (r: PanelRequest, identity: Identity, ctx: PageContext) => Promise<Response>,
+  allowed: readonly Kind[] = ["read", "admin"],
 ): PanelHandler {
   return async (r) => {
     const identity = await sessionOf(r);
     if (identity === null) return redirect("/");
     const ctx = await signedInContext(r, identity);
-    if (!hasRole(identity, "read", "admin")) return htmlResponse(publishPage(ctx), 403);
+    if (!hasRole(identity, ...allowed)) {
+      // A credential that only yanks or deletes sees its packages but cannot read their files.
+      if (hasRole(identity, "yank", "delete")) {
+        const text = "This page is only for credentials that can read packages.";
+        return htmlResponse(messagePage(ctx, "Forbidden", text), 403);
+      }
+      return htmlResponse(publishPage(ctx), 403);
+    }
     return handler(r, identity, ctx);
   };
 }
 
-const packageView = packageRoute(async (r, identity, ctx) => {
-  const { eco = "", name = "" } = r.params;
-  const visible = await visiblePackage(r.env, identity, eco, name);
-  if (visible === null) return notFoundPage(ctx);
-  const login = `${tokenPrefix(r.env)}${identity.project}`;
-  const base = publicUrl(r.env, r.request);
-  const snippets = placeholderSnippets(visible.adapter, base, login, [visible.view.name]);
-  const admin = hasRole(identity, "admin");
-  const groups = await readGroups(r.env);
-  const { eco: viewEco, name: viewName } = visible.view;
-  return htmlResponse(
-    packagePage(ctx, {
-      view: visible.view,
-      snippets,
-      transitive: visible.transitive,
-      ...visible.details,
-      admin,
-      groups: {
-        state: groups,
-        key: packageGroupKey(viewEco, viewName),
-        current: groupOf(groups, viewEco, viewName),
-      },
-    }),
-  );
-});
+/**
+ * The versions of a package the identity may yank and delete, and whether it may delete the
+ * whole package: the same rule as the API (`mayModify`), so a button is shown only where the
+ * request would be allowed.
+ */
+function packageActions(env: Env, identity: Identity, view: PackageView): PackageActions {
+  const allowed = (op: "yank" | "delete", version?: string) =>
+    mayModify(env, identity.roles, identity.grants, {
+      op,
+      eco: view.eco,
+      package: view.name,
+      ...(version === undefined ? {} : { version }),
+    });
+  const versions = view.versions.map((v) => v.version);
+  return {
+    yank: versions.filter((version) => allowed("yank", version)),
+    delete: versions.filter((version) => allowed("delete", version)),
+    deletePackage: allowed("delete"),
+  };
+}
+
+const packageView = packageRoute(
+  async (r, identity, ctx) => {
+    const { eco = "", name = "" } = r.params;
+    const visible = await visiblePackage(r.env, identity, eco, name);
+    if (visible === null) return notFoundPage(ctx);
+    const login = `${tokenPrefix(r.env)}${identity.project}`;
+    const base = publicUrl(r.env, r.request);
+    const snippets = placeholderSnippets(visible.adapter, base, login, [visible.view.name]);
+    const admin = hasRole(identity, "admin");
+    const canRead = hasRole(identity, "read", "admin");
+    const groups = await readGroups(r.env);
+    const { eco: viewEco, name: viewName } = visible.view;
+    return htmlResponse(
+      packagePage(ctx, {
+        view: visible.view,
+        snippets: canRead ? snippets : [],
+        transitive: visible.transitive,
+        ...visible.details,
+        admin,
+        canRead,
+        actions: packageActions(r.env, identity, visible.view),
+        // Without `read` the home page has no groups to link to.
+        ...(canRead
+          ? {
+              groups: {
+                state: groups,
+                key: packageGroupKey(viewEco, viewName),
+                current: groupOf(groups, viewEco, viewName),
+              },
+            }
+          : {}),
+      }),
+    );
+  },
+  ["read", "admin", "yank", "delete"],
+);
 
 const versionView = packageRoute(async (r, identity, ctx) => {
   const { eco = "", name = "", version = "" } = r.params;
@@ -624,7 +667,12 @@ function handoverFor(
     login: loginOf(r.env, credential.project),
     secret,
     roles: secretRoles(credential.roles, entry?.scope),
-    grants: { read: credential.read_grants, publish: credential.publish_grants },
+    grants: {
+      read: credential.read_grants,
+      publish: credential.publish_grants,
+      yank: credential.yank_grants,
+      delete: credential.delete_grants,
+    },
     expires: entry?.expires ?? null,
     adapterOf: (eco) => getAdapter(r.env, eco),
   };
@@ -899,13 +947,14 @@ async function startSession(
 }
 
 /**
- * Whether a secret opens the panel of its credential: a secret limited to `publish` does not
- * open one that can also read or administer (a credential that only publishes gets the publish
- * notice).
+ * Whether a secret with these roles opens the panel of its credential: it needs a role other
+ * than `publish` (`read`, `yank`, `delete` or `admin`). A secret limited to `publish` does not
+ * open the panel of a credential that has others (a credential that only publishes gets the
+ * publish notice).
  */
-function opensPanel(record: CredentialRecord, entry: Pick<AuthRecordEntry, "scope">): boolean {
-  if (!record.roles.some((role) => role !== "publish")) return true;
-  return effectiveRoles(record, entry).some((role) => role !== "publish");
+function opensPanel(record: CredentialRecord, roles: readonly Kind[]): boolean {
+  if (roles.some((role) => role !== "publish")) return true;
+  return record.roles.every((role) => role === "publish");
 }
 
 /**
@@ -923,7 +972,7 @@ async function loginSecretSignIn(r: PanelRequest, form: URLSearchParams): Promis
     password === ""
       ? ({ ok: false } as const)
       : await checkPassword(r.env, { project, password }, now, { allowAdmin: true });
-  if (!result.ok || !opensPanel(result.record, result.entry)) {
+  if (!result.ok || !opensPanel(result.record, effectiveRoles(result.record, result.entry))) {
     return loginFailed(r, "password", form, LOGIN_PASSWORD_FAILED);
   }
   if (!result.needsCode) {
@@ -970,13 +1019,7 @@ const login: PanelHandler = async (r) => {
   // A yank or delete login token is not a panel login.
   if (auth !== null && auth.identity.ops !== undefined) auth = null;
   // A secret limited to `publish` does not open the panel of a credential that can also read.
-  if (
-    auth !== null &&
-    auth.identity.record.roles.includes("read") &&
-    !hasRole(auth.identity, "read")
-  ) {
-    auth = null;
-  }
+  if (auth !== null && !opensPanel(auth.identity.record, auth.identity.roles)) auth = null;
   if (auth === null) return loginFailed(r, mode, form, error);
   return startSession(r, auth.identity.record.project);
 };
@@ -1124,12 +1167,12 @@ async function authorizePending(r: PanelRequest, state: AuthorizeState) {
   const record = await getCredential(r.env, pending.project, { now: r.now.getTime() });
   if (record === null) return null;
   const entry = await findLogin(record, pending.entry, r.now.getTime());
-  // A pull or publish login token carries `read` or `publish`, so an admin-only login signs in
-  // on those pages no more than it issues such a token; a yank or delete is for admins.
+  // A pull or publish login token carries `read` or `publish`, so a login with neither signs in
+  // on those pages no more than it issues such a token; a yank or delete is for any login.
   if (
     entry === null ||
     (!isAdminPurpose(state.session.purpose) &&
-      !effectiveRoles(record, entry).some((role) => role !== "admin"))
+      !effectiveRoles(record, entry).some((role) => role === "read" || role === "publish"))
   ) {
     return null;
   }

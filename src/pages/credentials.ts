@@ -9,7 +9,15 @@
  */
 
 import type { Eco } from "../adapters/types";
-import type { AuthEntry, Credential, Kind } from "../core/auth";
+import {
+  GRANT_ROLES,
+  KINDS,
+  emptyGrants,
+  type AuthEntry,
+  type Credential,
+  type GrantRole,
+  type Kind,
+} from "../core/auth";
 import type { Grant } from "../core/grants";
 import { apiPath, awaitsPin, credentialHref, dangerZone, isActiveAt, secretSummary } from "./admin";
 import { breadcrumbs, day, ECO_NAMES, plural } from "./catalog";
@@ -27,15 +35,10 @@ import { SLUG_PATTERN } from "./firstRun";
 import { markup, type SafeHtml } from "./html";
 import { layout, type PageContext } from "./layout";
 
-/** The roles that carry grants. */
-export type GrantRole = "read" | "publish";
-
-export const GRANT_ROLES: readonly GrantRole[] = ["read", "publish"];
-
 /** Every role in the order the panel lists them; a scope or role set is always written so. */
-const ALL_ROLES: readonly Kind[] = ["read", "publish", "admin"];
+const ALL_ROLES: readonly Kind[] = KINDS;
 
-/** The three roles as toggles, each with what it may do. */
+/** The roles as toggles, each with what it may do. */
 const ROLE_TOGGLES: readonly Toggle[] = [
   {
     value: "read",
@@ -48,9 +51,19 @@ const ROLE_TOGGLES: readonly Toggle[] = [
     hint: "Publishes new versions of the packages of its publish grants, usually from CI. It cannot install or list packages.",
   },
   {
+    value: "yank",
+    label: "yank",
+    hint: "Yanks versions of the packages of its yank grants, with a key, a GitHub Actions secret or a login. It cannot install, publish or delete.",
+  },
+  {
+    value: "delete",
+    label: "delete",
+    hint: "Permanently deletes versions of the packages of its delete grants; deleting a whole package needs a grant for all versions. It cannot undo a delete.",
+  },
+  {
     value: "admin",
     label: "admin",
-    hint: "Manages packages and credentials in this panel and through the API; sees every package. It has no grants of its own.",
+    hint: "Manages packages and credentials in this panel and through the API; sees every package and may yank and delete anything. It has no grants of its own.",
   },
 ];
 
@@ -165,6 +178,8 @@ function grantsFieldset(
 const SCOPE_HINTS: Readonly<Record<Kind, string>> = {
   read: "May install packages within the credential's read grants.",
   publish: "May publish new versions within the credential's publish grants.",
+  yank: "May yank versions within the credential's yank grants.",
+  delete: "May delete versions within the credential's delete grants.",
   admin:
     "May administer the registry: packages, credentials and secrets, in the panel and through the API. Keep it off for tokens committed to a repository or used in CI.",
 };
@@ -222,7 +237,12 @@ function grantCounts(credential: Credential): SafeHtml | number {
 
 /** The grants of one role of a credential. */
 function roleGrantsOf(credential: Credential, role: GrantRole): Grant[] {
-  return role === "read" ? credential.read_grants : credential.publish_grants;
+  return credential[`${role}_grants`];
+}
+
+/** `Read grants`, `Yank grants`: the heading of a role's list. */
+function grantsHeading(role: GrantRole): string {
+  return `${role.charAt(0).toUpperCase()}${role.slice(1)} grants`;
 }
 
 /** The roles a secret may use, as badges. */
@@ -307,7 +327,7 @@ export function newCredentialPage(ctx: PageContext, data: NewCredentialData): st
   const values: CredentialFormValues = data.values ?? {
     project: "",
     roles: ["read"],
-    grants: { read: [], publish: [] },
+    grants: emptyGrants(),
     scope: [],
     firstSecret: "none",
     totp: false,
@@ -325,7 +345,7 @@ export function newCredentialPage(ctx: PageContext, data: NewCredentialData): st
   ];
   const sections = GRANT_ROLES.map((role) => {
     const shown = roles.includes(role);
-    return markup`<h2 class="form-heading" id="new-${role}-grants"${attr("hidden", !shown)} data-grants-heading data-role="${role}">${role === "read" ? "Read grants" : "Publish grants"}</h2>
+    return markup`<h2 class="form-heading" id="new-${role}-grants"${attr("hidden", !shown)} data-grants-heading data-role="${role}">${grantsHeading(role)}</h2>
 ${grantsFieldset(ecosystems, grantsOf(role), role, `new-${role}-grants`, !shown)}`;
   });
   return layout(
@@ -509,9 +529,7 @@ function grantsSection(credential: Credential, ecosystems: readonly Eco[]): Safe
   const { project } = credential;
   const url = apiPath("credentials", project);
   const forms = GRANT_ROLES.filter((role) => credential.roles.includes(role)).map(
-    (
-      role,
-    ) => markup`<h3 id="${role}-grants">${role === "read" ? "Read grants" : "Publish grants"}</h3>
+    (role) => markup`<h3 id="${role}-grants">${grantsHeading(role)}</h3>
 <form class="box" data-api-form="grants" data-api-method="PATCH" data-api-url="${url}" data-grants-field="${role}_grants">
 ${grantsFieldset(ecosystems, roleGrantsOf(credential, role), role, `${role}-grants`)}
 ${FORM_ERROR}
@@ -519,9 +537,9 @@ ${FORM_ERROR}
 </form>`,
   );
   const note = isAdminOnly(credential)
-    ? markup`<div class="box"><p class="hint">This credential only administers: it sees and manages everything and has no grants. Give it the read or publish role below to let a secret install or publish with grants.</p></div>`
+    ? markup`<div class="box"><p class="hint">This credential only administers: it sees and manages everything and has no grants. Give it the read, publish, yank or delete role below to let a secret use grants.</p></div>`
     : credential.roles.includes("admin")
-      ? markup`<p class="hint">A secret with the admin role sees every package whatever the grants below say; the grants apply to its read and publish secrets.</p>`
+      ? markup`<p class="hint">A secret with the admin role sees every package whatever the grants below say; the grants apply to its read, publish, yank and delete secrets.</p>`
       : "";
   return markup`<section class="section" aria-labelledby="grants">
 <h2 id="grants">Grants</h2>
@@ -717,7 +735,7 @@ function tabBar(credential: Credential, current: CredentialTab): SafeHtml {
   const counts: Partial<Record<CredentialTab, number>> = {
     grants: isAdminOnly(credential)
       ? undefined
-      : credential.read_grants.length + credential.publish_grants.length,
+      : GRANT_ROLES.reduce((sum, role) => sum + roleGrantsOf(credential, role).length, 0),
     secrets: credential.auth.length,
   };
   const links = CREDENTIAL_TABS.map((tab) => {

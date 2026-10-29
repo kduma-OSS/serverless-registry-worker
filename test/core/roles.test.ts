@@ -74,11 +74,11 @@ describe("stored credential records", () => {
       project: "legacy-read",
       roles: ["read"],
       auth: [],
-      grants: { read: [GRANT], publish: [] },
+      grants: { read: [GRANT], publish: [], yank: [], delete: [] },
     });
     const publisher = await getCredential(env, "legacy-pub", { fresh: true });
     expect(publisher?.roles).toEqual(["publish"]);
-    expect(publisher?.grants).toEqual({ read: [], publish: [GRANT] });
+    expect(publisher?.grants).toEqual({ read: [], publish: [GRANT], yank: [], delete: [] });
   });
 
   it("rejects role sets that are not allowed", async () => {
@@ -96,7 +96,7 @@ describe("roles of a secret", () => {
     project: "dual-roles",
     roles: ["read", "publish"],
     auth: [],
-    grants: { read: [GRANT], publish: [] },
+    grants: { read: [GRANT], publish: [], yank: [], delete: [] },
   };
 
   it("defaults to every role of the credential and stays within them", () => {
@@ -506,7 +506,7 @@ describe("admin combined with read and publish", () => {
     const project = await adminReader();
     const record = await getCredential(env, project, { fresh: true });
     expect(record?.roles).toEqual(["read", "admin"]);
-    expect(record?.grants).toEqual({ read: [GRANT], publish: [] });
+    expect(record?.grants).toEqual({ read: [GRANT], publish: [], yank: [], delete: [] });
     const alone = unique("adm-alone-");
     const body = {
       project: alone,
@@ -541,7 +541,7 @@ describe("admin combined with read and publish", () => {
     await putCredential(env, {
       project: name,
       roles: ["read", "admin"],
-      grants: { read: [GRANT], publish: [] },
+      grants: { read: [GRANT], publish: [], yank: [], delete: [] },
       auth: [await keyEntry(read, ["read"]), await keyEntry(admin, ["admin"])],
     });
     const roles = async (secret: string) =>
