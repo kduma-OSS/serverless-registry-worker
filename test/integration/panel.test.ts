@@ -479,6 +479,23 @@ describe("credential forms", () => {
     const token = tokenOf(page);
     expect(token).toMatch(/^form-shop:[A-Za-z0-9]{32}$/);
     expect((await call("GET", "/api/v1/whoami", { token })).status).toBe(200);
+    // The message for the person the token is for: server, login, token, what it may do, how.
+    expect(page).toContain("Message for the user");
+    const message =
+      /<textarea hidden readonly data-handover-text>([\s\S]*?)<\/textarea>/.exec(page)?.[1] ?? "";
+    expect(message).toMatch(new RegExp(`Server:\\s+${ORIGIN}`));
+    expect(message).toMatch(/Login:\s+form-shop/);
+    expect(message).toContain(token);
+    expect(message).toContain("Read access");
+    expect(message).toContain("Composer: acme/sdk (versions ^1.1)");
+    expect(message).toContain("Composer: acme/billing (all versions)");
+    expect(message).toContain("Using Composer packages");
+    expect(message).not.toContain("Publish access");
+    expect(page).toContain('<script src="/handover.js" defer></script>');
+    // These pages (and only these) may load the PDF library from cdnjs.
+    expect(res.headers.get("content-security-policy")).toBe(
+      "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    );
     const stored = await (
       await call("GET", "/api/v1/credentials/form-shop", { token: adminToken })
     ).json();
@@ -534,6 +551,14 @@ describe("credential forms", () => {
     expect(page).toContain('<div class="qr"><svg ');
     expect(page).toMatch(/otpauth:\/\/totp\/[^<]*form-login\?secret=[A-Z2-7]+/);
     expect(page).toContain("Sign in as <code>form-login</code> with this password.");
+    const msg =
+      /<textarea hidden readonly data-handover-text>([\s\S]*?)<\/textarea>/.exec(page)?.[1] ?? "";
+    expect(msg).toMatch(/Password:\s+\S{12,}/);
+    expect(msg).toContain("authenticator app");
+    expect(msg).toMatch(/Link:\s+otpauth:\/\/totp\/[^\s]*form-login\?secret=[A-Z2-7]+/);
+    expect(msg).toContain(`sreg login --registry ${ORIGIN}`);
+    expect(page).toMatch(/<canvas width="1" height="1" data-handover-qr="[01,]+"/);
+    expect(res.headers.get("content-security-policy")).toContain("https://cdnjs.cloudflare.com");
     const stored = await (
       await call("GET", "/api/v1/credentials/form-login", { token: adminToken })
     ).json();
@@ -826,6 +851,12 @@ describe("credential forms", () => {
     expect(page).toContain('href="/admin/credentials/form-shop?tab=secrets"');
     const token = tokenOf(page);
     expect(token).toMatch(/^form-shop:/);
+    const message =
+      /<textarea hidden readonly data-handover-text>([\s\S]*?)<\/textarea>/.exec(page)?.[1] ?? "";
+    expect(message).toContain(token);
+    expect(message).toMatch(/Valid until:\s+2099-01-01/);
+    expect(message).toContain("Read access");
+    expect(res.headers.get("content-security-policy")).toContain("https://cdnjs.cloudflare.com");
     expect((await call("GET", "/api/v1/whoami", { token })).status).toBe(200);
   });
 
@@ -897,6 +928,10 @@ describe("credential forms", () => {
     const page = await res.text();
     expect(page).toContain("<h1>Login added</h1>");
     expect(page).toContain("correct-horse-battery");
+    const message =
+      /<textarea hidden readonly data-handover-text>([\s\S]*?)<\/textarea>/.exec(page)?.[1] ?? "";
+    expect(message).toMatch(/Password:\s+correct-horse-battery/);
+    expect(message).toContain("One-time code");
     expect(page).toContain('<div class="qr"><svg ');
     expect(page).toMatch(/otpauth:\/\/totp\/[^<]*login-shop\?secret=[A-Z2-7]+/);
     const stored = JSON.stringify(

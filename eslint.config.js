@@ -29,6 +29,8 @@ export default defineConfig(
         crypto: "readonly",
         btoa: "readonly",
         Uint8Array: "readonly",
+        Blob: "readonly",
+        clearTimeout: "readonly",
       },
     },
   },

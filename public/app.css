@@ -2392,6 +2392,167 @@ button:disabled {
 }
 
 /* ======================================================================================
+ * The message for the person a new secret is for (src/pages/handover.ts), on the one-time pages.
+ * ====================================================================================== */
+
+.centred-box.wide .centred-card .handover {
+  margin: var(--space-5) 0 var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.handover h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 1.1rem;
+}
+
+.handover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+.handover-actions[hidden] {
+  display: none;
+}
+
+.handover-actions button {
+  margin: 0;
+}
+
+.handover-status {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.handover-message {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  font-size: 0.9375rem;
+}
+
+.handover-message > :first-child {
+  margin-top: 0;
+}
+
+.handover-title {
+  margin: 0 0 var(--space-3);
+  font-size: 1.2rem;
+}
+
+.handover-message h4 {
+  margin: var(--space-4) 0 var(--space-1);
+  font-size: 1rem;
+}
+
+.handover-message p {
+  margin: 0 0 var(--space-2);
+}
+
+.handover-message ul {
+  margin: 0 0 var(--space-2);
+  padding-left: 1.25rem;
+}
+
+.handover-note {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.handover-kv {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+}
+
+.handover-kv > div {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr;
+  gap: var(--space-3);
+}
+
+.handover-kv dt {
+  color: var(--muted);
+}
+
+.handover-kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.handover-kv dd.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+}
+
+.handover-code {
+  margin: 0 0 var(--space-2);
+}
+
+.handover-code-title {
+  margin: var(--space-2) 0 var(--space-1);
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.handover-code pre {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.handover-qr {
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.handover-qr canvas {
+  display: block;
+  width: 11rem;
+  height: 11rem;
+  border: 1px solid var(--border);
+  image-rendering: pixelated;
+}
+
+.handover-qr figcaption {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 40rem) {
+  .handover-kv > div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+/* "Save as PDF" of the browser is the way to a PDF when the library cannot be loaded: print only the message. */
+@media print {
+  .centred-page .centred-brand,
+  .centred-page .centred-card > :not(.handover),
+  .handover > :not(.handover-message) {
+    display: none;
+  }
+
+  .centred-page,
+  .centred-card,
+  .handover-message {
+    border: none;
+    background: #fff;
+    color: #000;
+    box-shadow: none;
+  }
+}
+
+/* ======================================================================================
  * The setup checklist: first run and the settings page.
  * ====================================================================================== */
 

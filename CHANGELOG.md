@@ -8,6 +8,15 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- The one-time pages of a new token or login show a ready message for the person it is for:
+  the server, login, token or password, expiry and one-time code (with the QR code), what the
+  secret may do (read, publish, administer) and client configuration for each ecosystem. It can
+  be copied formatted for a mail client (with the QR code as an image), copied as plain text or
+  downloaded as a PDF. The PDF library loads from cdnjs only when the PDF is asked for, and these
+  pages are the only ones whose Content-Security-Policy allows that script source.
+
 ## [0.3.5] - 2026-10-29
 
 ### Changed
