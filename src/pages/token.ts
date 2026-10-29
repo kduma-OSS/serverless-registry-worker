@@ -6,8 +6,9 @@
 
 import { qrSvg } from "../core/qr";
 import { copyBlock } from "./components";
+import { handoverSection, type HandoverInput } from "./handover";
 import { markup, SafeHtml } from "./html";
-import { centredLayout, type PageContext } from "./layout";
+import { centredLayout, type LayoutOptions, type PageContext } from "./layout";
 
 /** What the token page shows. */
 export interface TokenPageData {
@@ -18,6 +19,15 @@ export interface TokenPageData {
   token: string;
   /** Where to go on, e.g. the credential's page. */
   next: { href: string; label: string };
+  /** Makes the message for the person the token is for (`src/pages/handover.ts`). */
+  handover?: HandoverInput;
+}
+
+/** A page with the message is wider and loads the script that copies it. */
+function handoverLayout(handover: HandoverInput | undefined): LayoutOptions {
+  return handover === undefined
+    ? { page: "token" }
+    : { page: "token", wide: true, scripts: ["/handover.js"] };
 }
 
 /** The token page. */
@@ -29,8 +39,9 @@ export function tokenPage(ctx: PageContext, data: TokenPageData): string {
 <p class="sub">${data.text}</p>
 <p class="once">The token is shown <strong>only once</strong>. Copy it now and store it in a password manager or a CI secret.</p>
 ${copyBlock(data.token)}
+${data.handover === undefined ? "" : handoverSection(data.handover)}
 <a class="button block" href="${data.next.href}">${data.next.label}</a>`,
-    { page: "token" },
+    handoverLayout(data.handover),
   );
 }
 
@@ -46,6 +57,8 @@ export interface LoginPageData {
   /** The one-time code enrolment, when the secret has TOTP. */
   totp?: { secret: string; otpauthUri: string };
   next: { href: string; label: string };
+  /** Makes the message for the person the login is for (`src/pages/handover.ts`). */
+  handover?: HandoverInput;
 }
 
 /**
@@ -78,7 +91,8 @@ ${copyBlock(data.totp.secret, "Key")}`;
 <p class="once">The password is shown <strong>only once</strong>. Copy it now and store it in a password manager.</p>
 ${copyBlock(data.password, "Password")}
 ${totp}
+${data.handover === undefined ? "" : handoverSection(data.handover)}
 <a class="button block" href="${data.next.href}">${data.next.label}</a>`,
-    { page: "token" },
+    handoverLayout(data.handover),
   );
 }

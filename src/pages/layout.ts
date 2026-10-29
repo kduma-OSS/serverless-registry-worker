@@ -19,6 +19,14 @@ export const CONTENT_SECURITY_POLICY =
   "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 /**
+ * The policy of the one-time pages that make the message for a new secret: also scripts from
+ * cdnjs, where the PDF library (jsPDF, with a subresource integrity hash) comes from when the PDF
+ * is asked for. This is the only external script the panel ever loads.
+ */
+export const HANDOVER_CONTENT_SECURITY_POLICY =
+  "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
+/**
  * Headers of every HTML response. `Referrer-Policy: same-origin` keeps referrers inside the
  * registry, so browsers send the real `Origin` with the panel's form posts (with `no-referrer`
  * they send `Origin: null`).

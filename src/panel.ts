@@ -11,6 +11,7 @@
  * the groups page), which are form posts checked like the login form.
  */
 
+import { getAdapter } from "./adapters/index";
 import { ECOS } from "./adapters/types";
 import {
   addSecret,
@@ -111,7 +112,13 @@ import {
 } from "./pages/credentials";
 import { firstRunPage } from "./pages/firstRun";
 import { markup } from "./pages/html";
-import { ADMIN_SECTIONS, htmlResponse, type PageContext } from "./pages/layout";
+import {
+  ADMIN_SECTIONS,
+  HANDOVER_CONTENT_SECURITY_POLICY,
+  htmlResponse,
+  type PageContext,
+} from "./pages/layout";
+import type { HandoverInput } from "./pages/handover";
 import { loginCodePage, loginPage, type LoginMode } from "./pages/login";
 import { messagePage } from "./pages/message";
 import { packageHref } from "./pages/catalog";
@@ -385,7 +392,14 @@ const versionView = packageRoute(async (r, identity, ctx) => {
   const { eco = "", name = "", version = "" } = r.params;
   const base = publicUrl(r.env, r.request);
   const data = await visibleVersion(r.env, identity, eco, name, version, base);
-  return data === null ? notFoundPage(ctx) : htmlResponse(versionPage(ctx, data));
+  if (data === null) return notFoundPage(ctx);
+  const groups = await readGroups(r.env);
+  return htmlResponse(
+    versionPage(ctx, {
+      ...data,
+      groups: { state: groups, current: groupOf(groups, data.eco, data.name) },
+    }),
+  );
 });
 
 const download = packageRoute(async (r, identity, ctx) => {
@@ -593,6 +607,34 @@ function loginOf(env: Env, project: string): string {
   return `${tokenPrefix(env)}${project}`;
 }
 
+/** The roles a secret may use: its scope within the roles of its credential (no scope: all). */
+function secretRoles(roles: readonly Kind[], scope: readonly Kind[] | undefined): Kind[] {
+  return roles.filter((role) => scope === undefined || scope.includes(role));
+}
+
+/** What the message for the person a new secret is for is made from. */
+function handoverFor(
+  r: PanelRequest,
+  credential: CredentialView,
+  entry: { scope?: readonly Kind[]; expires?: string | null } | undefined,
+  secret: HandoverInput["secret"],
+): HandoverInput {
+  return {
+    server: publicUrl(r.env, r.request),
+    login: loginOf(r.env, credential.project),
+    secret,
+    roles: secretRoles(credential.roles, entry?.scope),
+    grants: { read: credential.read_grants, publish: credential.publish_grants },
+    expires: entry?.expires ?? null,
+    adapterOf: (eco) => getAdapter(r.env, eco),
+  };
+}
+
+/** A one-time page that holds the message: it may load the PDF library from cdnjs. */
+function handoverResponse(page: string): Response {
+  return htmlResponse(page, 200, { "content-security-policy": HANDOVER_CONTENT_SECURITY_POLICY });
+}
+
 /** `POST /admin/credentials/new`: the page with the first secret, or the form again. */
 const createCredentialPost = adminRoute(async (r, _identity, ctx) => {
   const form = (await readForm(r.request)) ?? new URLSearchParams();
@@ -612,25 +654,33 @@ const createCredentialPost = adminRoute(async (r, _identity, ctx) => {
   const { project, roles } = created.credential;
   const kind = roles.join(" + ");
   const next = { href: credentialHref(project), label: "Continue to the credential" };
+  const first = created.credential.auth[0];
   if (created.login !== undefined) {
-    return htmlResponse(
+    const { password } = created.login;
+    return handoverResponse(
       loginSecretPage(ctx, {
         title: "Credential created",
         text: markup`The ${kind} credential <strong>${project}</strong> has been created. Sign in as <code>${project}</code> with this password.`,
         project,
-        password: created.login.password,
+        password,
         ...totpOf(created.login),
         next,
+        handover: handoverFor(r, created.credential, first, {
+          kind: "login",
+          password,
+          ...totpOf(created.login),
+        }),
       }),
     );
   }
   if (created.token === undefined) return redirect(`${credentialHref(project)}?tab=secrets`);
-  return htmlResponse(
+  return handoverResponse(
     tokenPage(ctx, {
       title: "Credential created",
       text: markup`The ${kind} credential <strong>${project}</strong> has been created.`,
       token: created.token,
       next,
+      handover: handoverFor(r, created.credential, first, { kind: "key", token: created.token }),
     }),
   );
 });
@@ -753,24 +803,34 @@ const addSecretPost = adminRoute(async (r, _identity, ctx) => {
   }
   const next = { href: `${credentialHref(project)}?tab=secrets`, label: "Back to the credential" };
   if (added.login !== undefined) {
-    return htmlResponse(
+    const { password } = added.login;
+    return handoverResponse(
       loginSecretPage(ctx, {
         title: "Login added",
         text: markup`A new login (<code>${added.secret.id}</code>) has been added to <strong>${project}</strong>. Sign in as <code>${project}</code> with this password.`,
         project,
-        password: added.login.password,
+        password,
         ...totpOf(added.login),
         next,
+        handover: handoverFor(r, await readCredentialView(r.env, project), added.secret, {
+          kind: "login",
+          password,
+          ...totpOf(added.login),
+        }),
       }),
     );
   }
   if (added.token === undefined) return redirect(`${credentialHref(project)}?tab=secrets`);
-  return htmlResponse(
+  return handoverResponse(
     tokenPage(ctx, {
       title: "Secret added",
       text: markup`A new key secret (<code>${added.secret.id}</code>) has been added to <strong>${project}</strong>.`,
       token: added.token,
       next,
+      handover: handoverFor(r, await readCredentialView(r.env, project), added.secret, {
+        kind: "key",
+        token: added.token,
+      }),
     }),
   );
 });

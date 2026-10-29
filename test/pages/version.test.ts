@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { assignPackages, createGroup } from "../../src/core/groups";
 import { versionPage, type VersionPageData } from "../../src/pages/version";
 
 const ctx = {
@@ -150,5 +151,39 @@ describe("versionPage", () => {
     expect(page).toContain('<span class="file-name">&lt;x&gt;.zip</span>');
     expect(page).toContain("&lt;k&gt;: &lt;v&gt;");
     expect(page).not.toContain("<x>");
+  });
+});
+
+describe("the breadcrumb of a version page and its groups", () => {
+  let state = createGroup({ groups: [], packages: {} }, "Kit", null, "aaaa");
+  state = createGroup(state, "Server", "aaaa", "bbbb");
+  state = createGroup(state, "Vault", null, "cccc", "hidden");
+  const crumbs = (page: string): string => {
+    const start = page.indexOf('<nav class="crumbs"');
+    return page.slice(start, page.indexOf("</nav>", start));
+  };
+
+  it("shows the groups between Packages and the package", () => {
+    const grouped = assignPackages(state, ["composer:acme/sdk"], "bbbb");
+    const page = versionPage(ctx, { ...data, groups: { state: grouped, current: "bbbb" } });
+    const trail = crumbs(page);
+    expect(trail).toContain('<a href="/#group-aaaa">Kit</a>');
+    expect(trail).toContain('<a href="/#group-bbbb">Server</a>');
+    expect(trail.indexOf("Kit")).toBeLessThan(trail.indexOf("Server"));
+    expect(trail.indexOf("Server")).toBeLessThan(trail.indexOf("acme/sdk"));
+    expect(trail).toContain('<li aria-current="page">1.2.0</li>');
+  });
+
+  it("leaves out a hidden group's path for a reader, shows it to an admin", () => {
+    const hidden = { state, current: "cccc" };
+    expect(crumbs(versionPage(ctx, { ...data, groups: hidden }))).not.toContain("Vault");
+    const admin = { ...ctx, user: { project: "root", roles: ["admin" as const] } };
+    expect(crumbs(versionPage(admin, { ...data, groups: hidden }))).toContain(
+      '<a href="/admin/packages?hidden=1#group-cccc">Vault</a>',
+    );
+  });
+
+  it("is unchanged without groups", () => {
+    expect(crumbs(versionPage(ctx, data))).not.toContain("group-");
   });
 });
