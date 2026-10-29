@@ -366,7 +366,12 @@ describe("auth entries", () => {
   it("hides grants of admin credentials", async () => {
     const credential = await toCredential({
       ...recordOf("root", "admin"),
-      grants: { read: [{ eco: "npm", package: "*", versions: "*" }], publish: [] },
+      grants: {
+        read: [{ eco: "npm", package: "*", versions: "*" }],
+        publish: [],
+        yank: [],
+        delete: [],
+      },
     });
     expect(credential.grants).toEqual([]);
   });
@@ -506,7 +511,7 @@ describe("authenticate with key secrets", () => {
     await putCredential(env, recordOf(project, "admin", record.auth));
     const result = await authenticate(request(`Bearer ${project}:${secret}`), authEnv(), deps);
     expect(result?.identity.roles).toEqual(["admin"]);
-    expect(result?.identity.grants).toEqual({ read: [], publish: [] });
+    expect(result?.identity.grants).toEqual({ read: [], publish: [], yank: [], delete: [] });
   });
 });
 

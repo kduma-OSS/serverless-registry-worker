@@ -15,6 +15,7 @@ import {
   activeLogins,
   authEntryId,
   effectiveRoles,
+  emptyGrants,
   getCredential,
   issueLoginToken,
   timingSafeEqual,
@@ -27,6 +28,7 @@ import {
   type LoginAuthRecord,
   type PublishScope,
 } from "./auth";
+import { mayModify } from "./modify";
 import { loginTokenExtendedTtlHours, maxPublishScopes } from "./config";
 import { ValidationError } from "./errors";
 import { isAllowed } from "./grants";
@@ -336,23 +338,42 @@ export function approvalProblem(
   record: CredentialRecord,
   entry?: Pick<AuthRecordEntry, "scope">,
 ): string | null {
-  // A pull login carries the `read` role, a publish login the `publish` role, a yank or
-  // delete login the `admin` role: the credential must hold it and, when the `login` secret
-  // has a scope, the scope must include it.
-  const role: Kind =
-    session.purpose === "pull" ? "read" : session.purpose === "publish" ? "publish" : "admin";
-  const verb = role === "read" ? "download" : role === "publish" ? "publish" : session.purpose;
+  // A pull login carries the `read` role and a publish login the `publish` role: the credential
+  // must hold it and, when the `login` secret has a scope, the scope must include it. A yank or
+  // delete login is approved by an `admin` credential, or by one that holds the `yank` or
+  // `delete` role and whose grants of that role cover every operation.
+  if (isAdminPurpose(session.purpose)) return adminApprovalProblem(env, session, record, entry);
+  const role: Kind = session.purpose === "pull" ? "read" : "publish";
+  const verb = role === "read" ? "download" : "publish";
   if (!record.roles.includes(role)) {
-    return `This login cannot ${verb}: it belongs to a credential that is not ${role === "admin" ? "an admin" : `a ${role}`} credential.`;
+    return `This login cannot ${verb}: it belongs to a credential that is not a ${role} credential.`;
   }
   if (entry !== undefined && !effectiveRoles(record, entry).includes(role)) {
     return `This login cannot ${verb}: its scope does not include the ${role} role.`;
   }
-  if (session.purpose === "pull" || isAdminPurpose(session.purpose)) return null;
+  if (session.purpose === "pull") return null;
   const denied = checkScopes(env, record, session.scopes ?? []).filter((c) => !c.allowed);
   return denied.length === 0
     ? null
     : "This credential's grants do not allow every operation listed above.";
+}
+
+function adminApprovalProblem(
+  env: Pick<Env, "ECOSYSTEMS">,
+  session: LoginSession,
+  record: CredentialRecord,
+  entry?: Pick<AuthRecordEntry, "scope">,
+): string | null {
+  const purpose = session.purpose as AdminPurpose;
+  if (!record.roles.includes("admin") && !record.roles.includes(purpose)) {
+    return `This login cannot ${purpose}: it belongs to a credential that has neither the admin nor the ${purpose} role.`;
+  }
+  const roles = entry === undefined ? record.roles : effectiveRoles(record, entry);
+  if (!roles.includes("admin") && !roles.includes(purpose)) {
+    return `This login cannot ${purpose}: its scope includes neither the admin nor the ${purpose} role.`;
+  }
+  const denied = (session.ops ?? []).some((op) => !mayModify(env, roles, record.grants, op));
+  return denied ? "This credential's grants do not allow every operation listed above." : null;
 }
 
 /** Options of {@link decideLoginSession}. */
@@ -399,7 +420,14 @@ export async function decideLoginSession(
     token,
     expires_at: new Date(Math.floor(expiresAt / 1000) * 1000).toISOString(),
     project: record.project,
-    kind: session.purpose === "pull" ? "read" : session.purpose === "publish" ? "publish" : "admin",
+    kind:
+      session.purpose === "pull"
+        ? "read"
+        : session.purpose === "publish"
+          ? "publish"
+          : effectiveRoles(record, entry).includes("admin")
+            ? "admin"
+            : session.purpose,
   };
   await writeDecision(env, session, { state: "approved", issued }, now);
   return true;
@@ -526,7 +554,7 @@ export async function checkPassword(
   if (record === null) {
     // Spend the same time as for a real project.
     await verifyLoginPassword(
-      { project: "", roles: ["read"], grants: { read: [], publish: [] }, auth: [dummyLogin()] },
+      { project: "", roles: ["read"], grants: emptyGrants(), auth: [dummyLogin()] },
       input.password,
       now,
     );
@@ -535,7 +563,11 @@ export async function checkPassword(
   const entry = await verifyLoginPassword(record, input.password, now);
   if (entry === null) return { ok: false };
   const roles = effectiveRoles(record, entry);
-  if (options.allowAdmin !== true && !roles.some((role) => role !== "admin")) return { ok: false };
+  // A pull or publish login token carries `read` or `publish`: a login with neither (an `admin`,
+  // `yank` or `delete` only login) signs in on those pages no more than it issues such a token.
+  if (options.allowAdmin !== true && !roles.some((role) => role === "read" || role === "publish")) {
+    return { ok: false };
+  }
   return {
     ok: true,
     record,

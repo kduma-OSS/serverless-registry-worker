@@ -8,8 +8,8 @@
 
 import type { Eco } from "./adapters/types";
 import type { Grant } from "./core/grants";
-import { GRANT_ROLES, type CredentialFormValues, type SecretFormValues } from "./pages/credentials";
-import { KINDS, type Kind } from "./core/auth";
+import type { CredentialFormValues, SecretFormValues } from "./pages/credentials";
+import { GRANT_ROLES, KINDS, type Kind } from "./core/auth";
 
 function field(form: URLSearchParams, name: string): string {
   return (form.get(name) ?? "").trim();
@@ -68,7 +68,12 @@ export function credentialForm(form: URLSearchParams): {
 } {
   const roles = formRoles(form);
   const administer = roles.includes("admin");
-  const grants = { read: formGrants(form, "read_"), publish: formGrants(form, "publish_") };
+  const grants = {
+    read: formGrants(form, "read_"),
+    publish: formGrants(form, "publish_"),
+    yank: formGrants(form, "yank_"),
+    delete: formGrants(form, "delete_"),
+  };
   const scope = formScope(form);
   const project = field(form, "project");
   const chosen = field(form, "first_secret");

@@ -8,6 +8,25 @@ out breaking changes and changes that require a data migration in their own sect
 
 ## [Unreleased]
 
+### Added
+
+- Roles `yank` and `delete`: a credential can be allowed to yank or delete only the package
+  versions its own grants (`yank_grants`, `delete_grants`) cover, without being an `admin`
+  (who still yanks and deletes anywhere). They work with a `key`, a `gh` entry (`_:gh.<jwt>`)
+  or a browser login with the usual approval; the credentials API, the panel's credential
+  forms and `whoami` know the new roles. Deleting a whole package needs a `delete` grant with
+  all versions. Accounts with these roles also see the package listing, filtered by their grants.
+- Existing credentials need no migration: a record without `yank` and `delete` grants reads as
+  having none.
+
+### Changed
+
+- A yank or delete login (`purpose` `yank` / `delete`) is also approved by a credential that
+  holds the `yank` / `delete` role and whose grants cover every operation; its token carries
+  that role instead of `admin`.
+- A `login` that has neither `read`, `publish` nor `admin` (a `yank` or `delete` only login)
+  does not open the panel, and a panel session carries only `read` and `admin`.
+
 ## [0.3.6] - 2026-10-29
 
 ### Changed

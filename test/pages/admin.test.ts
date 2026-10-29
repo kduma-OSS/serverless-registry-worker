@@ -81,6 +81,8 @@ const shop: Credential = {
   grants: [{ eco: "composer", package: "acme/*", versions: "^1.0", transitive: false }],
   read_grants: [{ eco: "composer", package: "acme/*", versions: "^1.0", transitive: false }],
   publish_grants: [],
+  yank_grants: [],
+  delete_grants: [],
 };
 
 const root: Credential = {
@@ -99,6 +101,8 @@ const root: Credential = {
   grants: [],
   read_grants: [],
   publish_grants: [],
+  yank_grants: [],
+  delete_grants: [],
 };
 
 function detail(credential: Credential, extra: Partial<CredentialPageData> = {}): string {
@@ -291,6 +295,8 @@ const publisher: Credential = {
   grants: [{ eco: "composer", package: "acme/*", versions: "*", transitive: true }],
   read_grants: [],
   publish_grants: [{ eco: "composer", package: "acme/*", versions: "*", transitive: true }],
+  yank_grants: [],
+  delete_grants: [],
 };
 
 const dual: Credential = {
@@ -302,6 +308,8 @@ const dual: Credential = {
     { ...shop.auth[1], scope: ["read", "publish"] },
   ] as Credential["auth"],
   publish_grants: [{ eco: "composer", package: "acme/sdk", versions: "*", transitive: true }],
+  yank_grants: [],
+  delete_grants: [],
 };
 
 describe("credential list", () => {
@@ -385,7 +393,7 @@ describe("new credential form", () => {
       values: {
         project: "ops",
         roles: ["admin"],
-        grants: { read: [], publish: [] },
+        grants: { read: [], publish: [], yank: [], delete: [] },
         scope: [],
         firstSecret: "login",
         totp: true,
@@ -409,6 +417,8 @@ describe("new credential form", () => {
         grants: {
           read: [],
           publish: [{ eco: "npm", package: "@acme/*", versions: "^2", transitive: false }],
+          yank: [],
+          delete: [],
         },
         scope: [],
         firstSecret: "none",
@@ -857,7 +867,7 @@ describe("credential with both roles", () => {
       values: {
         project: "x",
         roles: ["read", "publish"],
-        grants: { read: [], publish: [] },
+        grants: { read: [], publish: [], yank: [], delete: [] },
         scope: ["read"],
         firstSecret: "key",
         totp: false,

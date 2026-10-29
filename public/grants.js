@@ -156,10 +156,10 @@ if (typeof document !== "undefined") {
     function show(fieldset, mode) {
       const toggle = fieldset.querySelector("[data-grants-toggle]");
       if (mode === "text") {
-        const publish = fieldset.getAttribute("data-grant-kind") === "publish";
+        const read = fieldset.getAttribute("data-grant-kind") === "read";
         fieldset.querySelector("[data-grants-text]").value = GrantText.format(
           rowsOf(fieldset),
-          !publish,
+          read,
         );
         showError(fieldset, "");
       } else if (!applyText(fieldset)) {

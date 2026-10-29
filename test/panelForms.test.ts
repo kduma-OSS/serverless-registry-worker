@@ -34,7 +34,7 @@ describe("formGrants", () => {
 
 describe("credentialForm", () => {
   // The grant rows of one role: each list of the form has its own field names.
-  const rowOf = (role: "read" | "publish"): [string, string][] => [
+  const rowOf = (role: "read" | "publish" | "yank" | "delete"): [string, string][] => [
     [`${role}_grant`, "0"],
     [`${role}_grant_eco`, "npm"],
     [`${role}_grant_package`, "x"],
@@ -67,6 +67,26 @@ describe("credentialForm", () => {
       firstSecret: "none",
       totp: false,
     });
+  });
+
+  it("sends the yank and delete lists of a credential that holds those roles", () => {
+    const { body, values } = credentialForm(
+      form([
+        ["project", "cleaner"],
+        ["roles", "yank"],
+        ["roles", "delete"],
+        ...rowOf("yank"),
+        ...rowOf("delete"),
+        ...rowOf("read"),
+      ]),
+    );
+    expect(body).toMatchObject({ project: "cleaner", roles: ["yank", "delete"], secret: null });
+    expect(body).toHaveProperty("yank_grants", [
+      { eco: "npm", package: "x", versions: "*", transitive: false },
+    ]);
+    expect(body).toHaveProperty("delete_grants");
+    expect(body).not.toHaveProperty("read_grants");
+    expect(values.roles).toEqual(["yank", "delete"]);
   });
 
   it("sends a generated key as the first secret, with its description", () => {

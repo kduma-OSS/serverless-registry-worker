@@ -4,6 +4,7 @@
  * Every response carries `X-Min-Client-Version`.
  */
 
+import type { Eco } from "./adapters/types";
 import {
   addSecret,
   createCredential,
@@ -20,6 +21,7 @@ import {
 } from "./core/admin";
 import {
   authenticate,
+  emptyGrants,
   hasRole,
   legacyGrants,
   primaryKind,
@@ -29,6 +31,7 @@ import {
   type KindHint,
 } from "./core/auth";
 import { acceptBucket } from "./core/bucket";
+import { identityMayModify } from "./core/modify";
 import { publicUrl } from "./core/config";
 import { createLoginSession, opsAllow, pollLoginSession } from "./core/login";
 import { ValidationError } from "./core/errors";
@@ -93,19 +96,49 @@ const ok = (body: unknown): ApiResult => ({ status: 200, body });
 const created = (body: unknown): ApiResult => ({ status: 201, body });
 
 const ADMIN: readonly Kind[] = ["admin"];
-const READERS: readonly Kind[] = ["read", "admin"];
+const READERS: readonly Kind[] = ["read", "admin", "yank", "delete"];
+const YANKERS: readonly Kind[] = ["admin", "yank"];
+const DELETERS: readonly Kind[] = ["admin", "delete"];
 const PUBLISHERS: readonly Kind[] = ["publish"];
 
 const p = (c: ApiContext, name: string): string => c.params[name] ?? "";
 
 /**
  * The kind a `_:gh.<jwt>` login must resolve to for a route (docs/api.md 2.5): `publish` for the
- * publishing endpoints, `admin` for routes that need the `admin` role alone, otherwise `read`.
+ * publishing endpoints, `admin` for routes that need the `admin` role alone, the roles of the
+ * route for yank and delete (`admin` or `yank` / `delete`), otherwise `read`.
  */
 function kindHintFor(auth: ApiRoute["auth"]): KindHint {
   if (auth === "none" || auth === "any") return "read";
   if (auth.includes("publish")) return "publish";
+  if (auth === YANKERS || auth === DELETERS) return auth;
   return auth.length > 0 && auth.every((kind) => kind === "admin") ? "admin" : "read";
+}
+
+/**
+ * Throws `403 forbidden` unless the caller's grants allow the yank or delete: an `admin` may do
+ * both anywhere, a `yank` or `delete` credential only what its grants of that role cover. A
+ * login token was checked when it was approved and by the router against its operations.
+ */
+function requireMayModify(
+  c: ApiContext,
+  op: "yank" | "delete",
+  eco: string,
+  name: string,
+  version?: string,
+): void {
+  const target = {
+    op,
+    eco: eco as Eco,
+    package: name,
+    ...(version === undefined ? {} : { version }),
+  };
+  if (!identityMayModify(c.env, c.identity, target)) {
+    throw new ValidationError(
+      "forbidden",
+      `This credential's ${op} grants do not cover ${version === undefined ? "this package" : "this version"}.`,
+    );
+  }
 }
 
 const routes = new Router<ApiRoute>()
@@ -127,6 +160,8 @@ const routes = new Router<ApiRoute>()
         access: {
           ...(roles.includes("read") ? { read: grants.read } : {}),
           ...(roles.includes("publish") ? { publish: grants.publish } : {}),
+          ...(roles.includes("yank") ? { yank: grants.yank } : {}),
+          ...(roles.includes("delete") ? { delete: grants.delete } : {}),
         },
         ...(scopes === undefined ? {} : { scopes }),
         ...(ops === undefined ? {} : { ops }),
@@ -170,23 +205,30 @@ const routes = new Router<ApiRoute>()
     handler: async (c) => ok(await getPackage(c.env, c.identity, p(c, "eco"), p(c, "name"))),
   })
   .add("POST", "/api/v1/packages/:eco/:name/:version/yank", {
-    auth: ADMIN,
+    auth: YANKERS,
     ops: { op: "yank", version: true },
-    handler: async (c) =>
-      ok(await yank(c.env, p(c, "eco"), p(c, "name"), p(c, "version"), c.now, c.publicUrl)),
+    handler: async (c) => {
+      requireMayModify(c, "yank", p(c, "eco"), p(c, "name"), p(c, "version"));
+      return ok(await yank(c.env, p(c, "eco"), p(c, "name"), p(c, "version"), c.now, c.publicUrl));
+    },
   })
   .add("DELETE", "/api/v1/packages/:eco/:name/:version", {
-    auth: ADMIN,
+    auth: DELETERS,
     ops: { op: "delete", version: true },
-    handler: async (c) =>
-      ok(
+    handler: async (c) => {
+      requireMayModify(c, "delete", p(c, "eco"), p(c, "name"), p(c, "version"));
+      return ok(
         await deleteVersion(c.env, p(c, "eco"), p(c, "name"), p(c, "version"), c.now, c.publicUrl),
-      ),
+      );
+    },
   })
   .add("DELETE", "/api/v1/packages/:eco/:name", {
-    auth: ADMIN,
+    auth: DELETERS,
     ops: { op: "delete", version: false },
-    handler: async (c) => ok(await deletePackage(c.env, p(c, "eco"), p(c, "name"), c.publicUrl)),
+    handler: async (c) => {
+      requireMayModify(c, "delete", p(c, "eco"), p(c, "name"));
+      return ok(await deletePackage(c.env, p(c, "eco"), p(c, "name"), c.publicUrl));
+    },
   })
   .add("POST", "/api/v1/packages/:eco/:name/reindex", {
     auth: ADMIN,
@@ -320,8 +362,8 @@ function checkOps(
 const ANONYMOUS: Identity = {
   project: "",
   roles: ["read"],
-  grants: { read: [], publish: [] },
-  record: { project: "", roles: ["read"], auth: [], grants: { read: [], publish: [] } },
+  grants: emptyGrants(),
+  record: { project: "", roles: ["read"], auth: [], grants: emptyGrants() },
   entryId: "",
 };
 

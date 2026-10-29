@@ -160,7 +160,7 @@
   }
 
   const BODIES = {
-    // `data-grants-field` names the list a form saves (`read_grants`, `publish_grants`).
+    // `data-grants-field` names the list a form saves (`read_grants`, `publish_grants`, `yank_grants`, `delete_grants`).
     grants: function (form) {
       const body = {};
       body[form.getAttribute("data-grants-field") || "grants"] = grants(form);

@@ -12,6 +12,8 @@ export function roleGrants(kind: Kind, grants: Grant[] = []): RoleGrants {
   return {
     read: kind === "read" ? grants : [],
     publish: kind === "publish" ? grants : [],
+    yank: kind === "yank" ? grants : [],
+    delete: kind === "delete" ? grants : [],
   };
 }
 

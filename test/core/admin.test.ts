@@ -277,6 +277,8 @@ describe("credentials", () => {
       grants,
       read_grants: grants,
       publish_grants: [],
+      yank_grants: [],
+      delete_grants: [],
     });
     expect(JSON.stringify(res)).not.toContain("sha256:");
     const parsed = parseToken(res.token ?? "");

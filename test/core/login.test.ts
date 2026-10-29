@@ -733,7 +733,9 @@ describe("yank and delete logins", () => {
       const session = await sessionOf({ purpose, scopes: [version] });
       expect(approvalProblem(env, session, admin.record)).toBeNull();
       expect(approvalProblem(env, session, reader.record)).toContain(`cannot ${purpose}`);
-      expect(approvalProblem(env, session, writer.record)).toContain("not an admin credential");
+      expect(approvalProblem(env, session, writer.record)).toContain(
+        `neither the admin nor the ${purpose} role`,
+      );
       expect(await decideLoginSession(env, session, reader.record, reader.entryId, true, NOW)).toBe(
         false,
       );

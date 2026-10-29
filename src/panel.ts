@@ -39,7 +39,6 @@ import {
   sessionIdentity,
   sessionValueFrom,
   type Authentication,
-  type AuthRecordEntry,
   type Kind,
   type CredentialRecord,
   type Identity,
@@ -624,7 +623,12 @@ function handoverFor(
     login: loginOf(r.env, credential.project),
     secret,
     roles: secretRoles(credential.roles, entry?.scope),
-    grants: { read: credential.read_grants, publish: credential.publish_grants },
+    grants: {
+      read: credential.read_grants,
+      publish: credential.publish_grants,
+      yank: credential.yank_grants,
+      delete: credential.delete_grants,
+    },
     expires: entry?.expires ?? null,
     adapterOf: (eco) => getAdapter(r.env, eco),
   };
@@ -899,13 +903,14 @@ async function startSession(
 }
 
 /**
- * Whether a secret opens the panel of its credential: a secret limited to `publish` does not
- * open one that can also read or administer (a credential that only publishes gets the publish
- * notice).
+ * Whether a secret with these roles opens the panel of its credential: it needs `read` or
+ * `admin`. A secret limited to `publish` does not open the panel of a credential that can also
+ * read or administer (a credential that only publishes gets the publish notice), and a
+ * `yank` or `delete` role alone has no panel.
  */
-function opensPanel(record: CredentialRecord, entry: Pick<AuthRecordEntry, "scope">): boolean {
-  if (!record.roles.some((role) => role !== "publish")) return true;
-  return effectiveRoles(record, entry).some((role) => role !== "publish");
+function opensPanel(record: CredentialRecord, roles: readonly Kind[]): boolean {
+  if (roles.includes("read") || roles.includes("admin")) return true;
+  return record.roles.every((role) => role === "publish");
 }
 
 /**
@@ -923,7 +928,7 @@ async function loginSecretSignIn(r: PanelRequest, form: URLSearchParams): Promis
     password === ""
       ? ({ ok: false } as const)
       : await checkPassword(r.env, { project, password }, now, { allowAdmin: true });
-  if (!result.ok || !opensPanel(result.record, result.entry)) {
+  if (!result.ok || !opensPanel(result.record, effectiveRoles(result.record, result.entry))) {
     return loginFailed(r, "password", form, LOGIN_PASSWORD_FAILED);
   }
   if (!result.needsCode) {
@@ -969,14 +974,9 @@ const login: PanelHandler = async (r) => {
   }
   // A yank or delete login token is not a panel login.
   if (auth !== null && auth.identity.ops !== undefined) auth = null;
-  // A secret limited to `publish` does not open the panel of a credential that can also read.
-  if (
-    auth !== null &&
-    auth.identity.record.roles.includes("read") &&
-    !hasRole(auth.identity, "read")
-  ) {
-    auth = null;
-  }
+  // A secret limited to `publish` does not open the panel of a credential that can also read,
+  // and `yank` or `delete` alone has no panel.
+  if (auth !== null && !opensPanel(auth.identity.record, auth.identity.roles)) auth = null;
   if (auth === null) return loginFailed(r, mode, form, error);
   return startSession(r, auth.identity.record.project);
 };
@@ -1124,12 +1124,12 @@ async function authorizePending(r: PanelRequest, state: AuthorizeState) {
   const record = await getCredential(r.env, pending.project, { now: r.now.getTime() });
   if (record === null) return null;
   const entry = await findLogin(record, pending.entry, r.now.getTime());
-  // A pull or publish login token carries `read` or `publish`, so an admin-only login signs in
-  // on those pages no more than it issues such a token; a yank or delete is for admins.
+  // A pull or publish login token carries `read` or `publish`, so a login with neither signs in
+  // on those pages no more than it issues such a token; a yank or delete is for any login.
   if (
     entry === null ||
     (!isAdminPurpose(state.session.purpose) &&
-      !effectiveRoles(record, entry).some((role) => role !== "admin"))
+      !effectiveRoles(record, entry).some((role) => role === "read" || role === "publish"))
   ) {
     return null;
   }

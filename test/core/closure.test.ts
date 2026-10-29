@@ -347,7 +347,7 @@ describe("allowedFor", () => {
       env,
       {
         ...identity(unique("publisher-"), [], "publish"),
-        grants: { read: [grant(`${v}/a`)], publish: [] },
+        grants: { read: [grant(`${v}/a`)], publish: [], yank: [], delete: [] },
       },
       "composer",
       adapter,

@@ -36,7 +36,7 @@ function input(overrides: Partial<HandoverInput> = {}): HandoverInput {
     login: "acme-ci",
     secret: { kind: "key", token: TOKEN },
     roles: ["read"],
-    grants: { read, publish },
+    grants: { read, publish, yank: [], delete: [] },
     expires: null,
     adapterOf: (eco) => ADAPTERS[eco],
     ...overrides,
@@ -88,12 +88,14 @@ describe("the message for a key secret", () => {
   });
 
   it("leaves out the note about dependencies when no grant opens them", () => {
-    const message = text({ grants: { read: [read[1] as Grant], publish: [] } });
+    const message = text({
+      grants: { read: [read[1] as Grant], publish: [], yank: [], delete: [] },
+    });
     expect(message).not.toContain("depend on");
   });
 
   it("says when nothing is granted yet", () => {
-    expect(text({ grants: { read: [], publish: [] } })).toContain(
+    expect(text({ grants: { read: [], publish: [], yank: [], delete: [] } })).toContain(
       "No packages are granted to this login yet.",
     );
   });
@@ -130,7 +132,9 @@ describe("the message for a key secret", () => {
   });
 
   it("only mentions the roles the secret may use", () => {
-    const blocks = handoverBlocks(input({ roles: ["read"], grants: { read, publish } }));
+    const blocks = handoverBlocks(
+      input({ roles: ["read"], grants: { read, publish, yank: [], delete: [] } }),
+    );
     expect(handoverText(blocks)).not.toContain("acme/sdk");
   });
 });
@@ -179,7 +183,9 @@ describe("every ecosystem", () => {
       package: eco === "maven" ? "org.acme:lib" : "acme-pkg",
       versions: "*",
     }));
-    const blocks = handoverBlocks(input({ grants: { read: grants, publish: [] } }));
+    const blocks = handoverBlocks(
+      input({ grants: { read: grants, publish: [], yank: [], delete: [] } }),
+    );
     const found = headings(blocks).filter((h) => h.startsWith("Using "));
     expect(found).toHaveLength(ECOS.length);
     for (const block of blocks) if (block.t === "code") expect(block.text.trim()).not.toBe("");
@@ -197,7 +203,12 @@ describe("the renderings", () => {
     input({
       secret: { kind: "login", password: "pw<&>", totp: TOTP },
       roles: ["read"],
-      grants: { read: [{ eco: "npm", package: "@acme/<b>", versions: "*" }], publish: [] },
+      grants: {
+        read: [{ eco: "npm", package: "@acme/<b>", versions: "*" }],
+        publish: [],
+        yank: [],
+        delete: [],
+      },
     }),
   );
 
@@ -274,6 +285,8 @@ describe("the section of a page", () => {
         grants: {
           read: [{ eco: "npm", package: "@a/</script><img src=x>", versions: "*" }],
           publish: [],
+          yank: [],
+          delete: [],
         },
       }),
     ).value;

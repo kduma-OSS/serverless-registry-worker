@@ -86,6 +86,16 @@ export function isAllowed(
   );
 }
 
+/**
+ * Whether a grant of the ecosystem covers every version of the package (its `versions` is `*`).
+ * A narrower constraint is not enough: it would not cover versions published later.
+ */
+export function coversAllVersions(grants: readonly Grant[], eco: Eco, name: string): boolean {
+  return grants.some(
+    (g) => g.eco === eco && matchesPackage(g.package, name, eco) && allVersions(g.versions),
+  );
+}
+
 /** Whether any grant of the ecosystem covers the package, whatever the version. */
 export function isPackageAllowed(grants: readonly Grant[], eco: Eco, name: string): boolean {
   return grants.some((g) => g.eco === eco && matchesPackage(g.package, name, eco));
