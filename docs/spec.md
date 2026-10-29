@@ -471,7 +471,7 @@ All native-protocol responses have `Cache-Control: private, no-store` – indexe
 
 ## Home page and panel
 
-One HTML + CSS application with minimal vanilla JS (only `fetch` to `/api/v1`), served from Workers Static Assets, without a bundler or external dependencies. The user's view follows from the roles of the credential they logged in with (a secret limited to `publish` does not open the panel of a credential that can also read).
+One HTML + CSS application with minimal vanilla JS (only `fetch` to `/api/v1`), served from Workers Static Assets, without a bundler or external dependencies. The user's view follows from the roles of the credential they logged in with (a secret limited to `publish` does not open the panel of a credential that can also read; a credential that only yanks or deletes gets a home page with the packages its grants cover and, on each package page, "Yank" and "Delete" on the versions they cover, without version pages, downloads or configuration).
 
 **Login** (`GET /`): the registry's name above one centred card with "Sign in", a pill switch between the two fields "login / password" (the default) and a single "token" field (two radios styled by CSS; scripts show only the chosen fields, without scripts both stay visible); with a one-time code the card asks for it in a second step after the password, a "show" button on the secret fields and a full-width "Sign in" button; a failed login shows its error above the switch. The footer names the version and links the documentation. `POST /login` verifies like any other request, creates a session in KV and sets the cookie. `POST /logout` deletes the session. The first-run form and the pages that show a new token once share the centred card.
 

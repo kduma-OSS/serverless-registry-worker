@@ -44,6 +44,17 @@ export interface PackagePageData extends PackageDetails {
   /** Show the admin actions. */
   admin?: boolean;
   /**
+   * Which versions the viewer may yank and delete, and whether the whole package: an admin
+   * everything, a `yank` or `delete` credential what its grants cover. Absent: derived from
+   * `admin`.
+   */
+  actions?: PackageActions;
+  /**
+   * The viewer may read: versions link to their pages and the configuration and dependencies
+   * are shown. Default `true`; a `yank` or `delete` credential without `read` has none of it.
+   */
+  canRead?: boolean;
+  /**
    * The package groups, the package's key in them and the group it is in: the breadcrumb shows
    * the groups above the package, and an admin can move the package.
    */
@@ -52,40 +63,70 @@ export interface PackagePageData extends PackageDetails {
 
 type Version = PackageView["versions"][number];
 
+/** What the viewer may yank and delete on a package page. */
+export interface PackageActions {
+  /** The versions that may be yanked. */
+  yank: readonly string[];
+  /** The versions that may be deleted. */
+  delete: readonly string[];
+  /** Whether the whole package may be deleted. */
+  deletePackage: boolean;
+}
+
+/** An admin may do everything with every version. */
+export function allActions(view: PackageView): PackageActions {
+  const versions = view.versions.map((v) => v.version);
+  return { yank: versions, delete: versions, deletePackage: true };
+}
+
 /**
  * The "Actions" cell of one version: "Yank" and "Delete", right-aligned. A yanked version has
  * an invisible placeholder where "Yank" would be, so the dates and "Delete" of every row line
  * up. Deleting the last version opens the package list.
  */
-function versionActions(view: PackageView, v: Version): SafeHtml {
+function versionActions(
+  view: PackageView,
+  v: Version,
+  actions: PackageActions,
+  home: string,
+): SafeHtml {
   const url = apiPath("packages", view.eco, view.name, v.version);
   const label = `${view.name} ${v.version}`;
-  const yank = v.yanked
-    ? markup`<span class="button secondary small action-placeholder" aria-hidden="true">Yank</span>`
-    : apiButton(
-        "Yank",
-        "POST",
-        `${url}/yank`,
-        { message: `Yank ${label}? It disappears from the indexes; lockfiles keep working.` },
-        { ariaLabel: `Yank ${label}` },
-      );
-  const last = view.versions.length === 1 ? { next: "/admin/packages" } : {};
-  const remove = apiButton(
-    "Delete",
-    "DELETE",
-    url,
-    { message: `Delete ${label} and its files? Lockfiles that use it stop working.` },
-    { style: "danger small", ariaLabel: `Delete ${label}`, ...last },
-  );
+  const yank =
+    v.yanked || !actions.yank.includes(v.version)
+      ? markup`<span class="button secondary small action-placeholder" aria-hidden="true">Yank</span>`
+      : apiButton(
+          "Yank",
+          "POST",
+          `${url}/yank`,
+          { message: `Yank ${label}? It disappears from the indexes; lockfiles keep working.` },
+          { ariaLabel: `Yank ${label}` },
+        );
+  const last = view.versions.length === 1 ? { next: home } : {};
+  const remove = actions.delete.includes(v.version)
+    ? apiButton(
+        "Delete",
+        "DELETE",
+        url,
+        { message: `Delete ${label} and its files? Lockfiles that use it stop working.` },
+        { style: "danger small", ariaLabel: `Delete ${label}`, ...last },
+      )
+    : markup`<span class="button danger small action-placeholder" aria-hidden="true">Delete</span>`;
   return markup`\n<span class="row-actions version-actions" role="group" aria-label="Actions">${yank}${remove}</span>`;
 }
 
-function versionList(view: PackageView, admin: boolean): SafeHtml {
+function versionList(
+  view: PackageView,
+  actions: PackageActions,
+  canRead: boolean,
+  home: string,
+): SafeHtml {
+  const manage = actions.yank.length > 0 || actions.delete.length > 0;
   const items = view.versions.map(
     (v) => markup`<li class="version-row">
-<a class="version" href="${versionHref(view.eco, view.name, v.version)}">${v.version}</a>
+${canRead ? markup`<a class="version" href="${versionHref(view.eco, view.name, v.version)}">${v.version}</a>` : markup`<span class="version">${v.version}</span>`}
 ${v.yanked ? markup`<span class="badge warn">yanked</span>` : ""}
-<span class="version-meta"><time datetime="${v.published}">${day(v.published)}</time> · ${plural(v.files.length, "file")}</span>${admin ? versionActions(view, v) : ""}
+<span class="version-meta"><time datetime="${v.published}">${day(v.published)}</time> · ${plural(v.files.length, "file")}</span>${manage ? versionActions(view, v, actions, home) : ""}
 </li>`,
   );
   return markup`<section class="pkg-section" aria-labelledby="versions">
@@ -149,8 +190,8 @@ ${snippetList(snippets, "config")}
 </details>`;
 }
 
-/** "Delete package" in the danger zone of an admin's package page. */
-function deletePackage(view: PackageView): SafeHtml {
+/** "Delete package" in the danger zone of a package page; `next` is where to go afterwards. */
+function deletePackage(view: PackageView, next: string): SafeHtml {
   return dangerZone({
     title: "Delete this package",
     text: "Deletes every version with its files and the package's indexes. Lockfiles that use it stop working.",
@@ -158,7 +199,7 @@ function deletePackage(view: PackageView): SafeHtml {
     url: apiPath("packages", view.eco, view.name),
     name: view.name,
     button: "Delete package",
-    next: "/admin/packages",
+    next,
   });
 }
 
@@ -185,6 +226,9 @@ export function groupCrumbs(
 export function packagePage(ctx: PageContext, data: PackagePageData): string {
   const { view } = data;
   const admin = data.admin === true;
+  const canRead = data.canRead !== false;
+  const actions =
+    data.actions ?? (admin ? allActions(view) : { yank: [], delete: [], deletePackage: false });
   const home = homeHref(ctx);
   const reindex = admin
     ? markup`<div class="pkg-header-actions">${apiButton(
@@ -223,10 +267,10 @@ ${via}
 ${group}
 ${reindex}
 </header>
-${versionList(view, admin)}
-${dependencies(view)}
-${configuration(data.snippets.length === 0 ? [] : [...data.snippets, ...exampleSnippet(data)])}
-${admin ? deletePackage(view) : ""}
+${versionList(view, actions, canRead, home)}
+${canRead ? dependencies(view) : ""}
+${canRead ? configuration(data.snippets.length === 0 ? [] : [...data.snippets, ...exampleSnippet(data)]) : ""}
+${actions.deletePackage ? deletePackage(view, admin ? "/admin/packages" : home) : ""}
 ${backLink(home, "All packages")}
 </div>`,
     { page: "package", section: "packages" },

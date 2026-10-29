@@ -348,22 +348,12 @@ describe("browser login with the yank role", () => {
     );
   });
 
-  it("does not sign in a yank-only login for a pull or to the panel", async () => {
+  it("does not sign in a yank-only login for a pull", async () => {
     const project = await operator(["yank"], { yank_grants: [ALL] });
     const pull = await call("POST", "/api/v1/auth/sessions", { body: { purpose: "pull" } });
     const created = await pull.json<Created>();
     const refused = await authorize(created, "login", { project, password: PASSWORD });
     expect(cookieOf(refused)).toBe("");
-
-    const panel = await exports.default.fetch(
-      new Request(`${ORIGIN}/login`, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN },
-        body: new URLSearchParams({ login: project, password: PASSWORD }).toString(),
-        redirect: "manual",
-      }),
-    );
-    expect(cookieOf(panel)).toBe("");
   });
 });
 
@@ -391,5 +381,140 @@ describe("the _ login with a yank gh secret", () => {
     expect((await callGh("DELETE", versionUrl("acme/gh-yank", "1.0.0"))).status).toBe(401);
     expect((await callGh("POST", yankUrl("acme/other", "1.1.0"))).status).toBe(403);
     expect(await yanked("acme/gh-yank")).toEqual({ "1.0.0": true });
+  });
+});
+
+describe("the panel for yank and delete accounts", () => {
+  const panel = (path: string, cookie = "", init: { method?: string; body?: unknown } = {}) =>
+    exports.default.fetch(
+      new Request(`${ORIGIN}${path}`, {
+        method: init.method ?? "GET",
+        headers: {
+          ...(cookie === "" ? {} : { cookie }),
+          ...(init.method === undefined || init.method === "GET"
+            ? {}
+            : { "x-requested-with": "fetch", "content-type": "application/json" }),
+        },
+        body: init.body === undefined ? undefined : JSON.stringify(init.body),
+        redirect: "manual",
+      }),
+    );
+
+  async function signIn(roles: string[], grants: Record<string, unknown>): Promise<string> {
+    const project = `pn-${roles.join("-")}-${Math.random().toString(36).slice(2, 8)}`;
+    await createCredential(
+      env,
+      {
+        project,
+        roles,
+        ...grants,
+        secret: {
+          type: "login",
+          password: PASSWORD,
+          ...(roles.length > 1 ? { scope: roles } : {}),
+        },
+      },
+      new Date(),
+    );
+    const res = await exports.default.fetch(
+      new Request(`${ORIGIN}/login`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", origin: ORIGIN },
+        body: new URLSearchParams({ login: project, password: PASSWORD }).toString(),
+        redirect: "manual",
+      }),
+    );
+    expect(res.status).toBe(303);
+    const cookie = (
+      res.headers.getSetCookie().find((c) => c.startsWith("sreg_session=")) ?? ""
+    ).split(";")[0];
+    expect(cookie).toMatch(/^sreg_session=/);
+    return cookie ?? "";
+  }
+
+  beforeAll(async () => {
+    for (const version of ["1.0.0", "1.1.0", "2.0.0"]) {
+      expect((await publishComposer(ci, "acme/panel", version)).status).toBe(201);
+    }
+    expect((await publishComposer(ci, "acme/hidden", "1.0.0")).status).toBe(201);
+  });
+
+  it("lists only the packages its grants cover on the home page", async () => {
+    const cookie = await signIn(["yank"], {
+      yank_grants: [{ eco: "composer", package: "acme/panel", versions: "^1.0" }],
+    });
+    const home = await panel("/", cookie);
+    expect(home.status).toBe(200);
+    const html = await home.text();
+    expect(html).toContain("Packages you can manage");
+    expect(html).toContain("acme/panel");
+    expect(html).not.toContain("acme/hidden");
+  });
+
+  it("offers Yank on the covered versions only and no Delete or configuration", async () => {
+    const cookie = await signIn(["yank"], {
+      yank_grants: [{ eco: "composer", package: "acme/panel", versions: "^1.0" }],
+    });
+    const res = await panel("/packages/composer/acme%2Fpanel", cookie);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Yank acme/panel 1.0.0");
+    expect(html).toContain("Yank acme/panel 1.1.0");
+    expect(html).not.toContain("Yank acme/panel 2.0.0");
+    expect(html).not.toContain("Delete acme/panel");
+    expect(html).not.toContain("Delete this package");
+    expect(html).not.toContain("Configuration and installation");
+    expect(html).not.toContain('href="/packages/composer/acme%2Fpanel/1.0.0');
+  });
+
+  it("yanks through the API with the session cookie, within the grants only", async () => {
+    const cookie = await signIn(["yank"], {
+      yank_grants: [{ eco: "composer", package: "acme/panel", versions: "^1.0" }],
+    });
+    const yank = (version: string) =>
+      panel(`/api/v1/packages/composer/acme%2Fpanel/${version}/yank`, cookie, {
+        method: "POST",
+        body: {},
+      });
+    expect((await yank("1.0.0")).status).toBe(200);
+    expect((await yank("2.0.0")).status).toBe(403);
+    const del = await panel("/api/v1/packages/composer/acme%2Fpanel/1.1.0", cookie, {
+      method: "DELETE",
+    });
+    expect(del.status).toBe(403);
+  });
+
+  it("offers Delete package only with a grant for all versions", async () => {
+    const narrow = await signIn(["delete"], {
+      delete_grants: [{ eco: "composer", package: "acme/panel", versions: "^1.0" }],
+    });
+    const some = await (await panel("/packages/composer/acme%2Fpanel", narrow)).text();
+    expect(some).toContain("Delete acme/panel 1.1.0");
+    expect(some).not.toContain("Delete this package");
+    expect(some).not.toContain("Yank acme/panel");
+
+    const wide = await signIn(["delete"], { delete_grants: [ALL] });
+    const all = await (await panel("/packages/composer/acme%2Fpanel", wide)).text();
+    expect(all).toContain("Delete this package");
+  });
+
+  it("keeps version pages, downloads and administration closed", async () => {
+    const cookie = await signIn(["yank", "delete"], { yank_grants: [ALL], delete_grants: [ALL] });
+    for (const path of [
+      "/packages/composer/acme%2Fpanel/1.1.0",
+      "/packages/composer/acme%2Fpanel/1.1.0/files/acme-panel-1.1.0.zip",
+      "/admin/packages",
+      "/admin/credentials",
+    ]) {
+      expect((await panel(path, cookie)).status, path).toBe(403);
+    }
+    expect(
+      (
+        await panel("/api/v1/packages/composer/acme%2Fpanel/reindex", cookie, {
+          method: "POST",
+          body: {},
+        })
+      ).status,
+    ).toBe(403);
   });
 });

@@ -1760,9 +1760,8 @@ export async function sessionIdentity(
   return {
     identity: {
       project: record.project,
-      // A cookie never publishes, yanks or deletes outside `admin`: those endpoints take a
-      // token (docs/api.md 2.3).
-      roles: roles.filter((role) => role === "read" || role === "admin"),
+      // A cookie never publishes: the publishing endpoints take a token (docs/api.md 2.3).
+      roles: roles.filter((role) => role !== "publish"),
       grants: record.grants,
       record,
       entryId: session.entry ?? "",

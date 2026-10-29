@@ -85,7 +85,7 @@ export async function visiblePackage(
   name: string,
 ): Promise<VisiblePackage | null> {
   const adapter = getAdapter(env, eco);
-  if (adapter === null || !hasRole(identity, "read", "admin")) return null;
+  if (adapter === null || !hasRole(identity, "read", "admin", "yank", "delete")) return null;
   const stored = storedName(adapter, name);
   try {
     const found = await getPackage(env, identity, eco, stored);

@@ -24,8 +24,11 @@ out breaking changes and changes that require a data migration in their own sect
 - A yank or delete login (`purpose` `yank` / `delete`) is also approved by a credential that
   holds the `yank` / `delete` role and whose grants cover every operation; its token carries
   that role instead of `admin`.
-- A `login` that has neither `read`, `publish` nor `admin` (a `yank` or `delete` only login)
-  does not open the panel, and a panel session carries only `read` and `admin`.
+- Accounts with only the `yank` and/or `delete` role can use the panel: after signing in with a
+  `login` they see the packages their grants cover and get "Yank" and "Delete" on the versions
+  those grants cover ("Delete package" with a grant for all versions), without version pages,
+  downloads, configuration or the administration pages. A panel session carries every role of
+  the `login` except `publish`.
 
 ## [0.3.6] - 2026-10-29
 

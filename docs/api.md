@@ -216,8 +216,11 @@ within the scope of the secret that authenticated it:
 reach none of the credential, reindex or bucket routes, cannot install or publish, and their
 package listing never has `dependencies`. An `admin` may yank and delete anywhere, whatever the
 grants say. A `yank`/`delete` secret is a `key`, a `gh` entry (for a job that yanks, see 2.5) or a
-`login` (2.6); a panel session never carries them (only `read` and `admin`), and a `login`
-that has neither `read`, `publish` nor `admin` does not open the panel.
+`login` (2.6). A `login` that has a `yank` or `delete` role in its scope signs in to the panel: a
+session started with it carries those roles (never `publish`), so the panel's "Yank" and
+"Delete" buttons, which call this API, work within the grants. Without `read` the panel shows
+only the packages the grants cover, their versions with those buttons and "Delete package"
+(with a grant for all versions), and no version pages, downloads, configuration or `/admin/*`.
 
 A login token approved for a yank or delete (2.6) carries the `admin` role, or for a credential
 that holds `yank` and/or `delete` instead of it, those roles, but only the operations it
@@ -320,9 +323,8 @@ a credential without `admin`, a `yank` / `delete` token (the credential holds th
 `login`'s scope includes it, and its grants of that role cover **every** operation, 5.1). A
 `login` whose scope has no `read` or `publish` (an `admin`, `yank` or `delete` login) approves
 yank and delete logins; it never issues a pull, a publish or a general administration token
-(the approval page of those does not accept it). A `login` with neither `read`, `admin` nor
-(for a credential that only publishes) the publish notice, that is a `yank` or `delete` only
-login, does not open the panel either.
+(the approval page of those does not accept it). A `yank` or `delete` only `login` signs in
+to the panel (2.4).
 
 The flow (the CLI does it for `sreg login`, `sreg auth <ecosystem> --login`, `sreg generic get
 --login`, `sreg <ecosystem> publish --login`, `sreg yank --login` and `sreg delete --login`):
