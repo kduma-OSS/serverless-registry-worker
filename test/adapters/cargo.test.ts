@@ -268,11 +268,8 @@ describe("buildIndex", () => {
     expect(files.map((f) => [f.key, f.contentType])).toEqual([
       ["cargo/index/se/rd/serde", "text/plain; charset=utf-8"],
     ]);
-    const expected = Object.fromEntries(
-      Object.entries(fixture as Json).filter(([key]) => key !== "pubtime"),
-    );
     const [line] = lines(files[0]?.body);
-    expect(line).toEqual({ ...expected, v: 2 });
+    expect(line).toEqual({ ...(fixture as Json), v: 2 });
     expect(Object.keys(line ?? {})).toEqual([
       "name",
       "vers",
@@ -282,6 +279,7 @@ describe("buildIndex", () => {
       "yanked",
       "rust_version",
       "v",
+      "pubtime",
     ]);
   });
 
@@ -313,6 +311,7 @@ describe("buildIndex", () => {
       features: {},
       yanked: true,
       v: 2,
+      pubtime: "2026-10-28T10:00:00Z",
     });
     expect(Object.keys(body[2] ?? {})).toEqual([
       "name",
@@ -324,6 +323,7 @@ describe("buildIndex", () => {
       "yanked",
       "links",
       "v",
+      "pubtime",
     ]);
   });
 

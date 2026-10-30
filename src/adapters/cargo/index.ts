@@ -198,7 +198,11 @@ function parseManifest(input: PublishInit): Manifest {
   };
 }
 
-/** The sparse index line of a version: the stored fields plus `cksum`, `yanked` and `v: 2`. */
+/**
+ * The sparse index line of a version: the stored fields plus `cksum`, `yanked`, `v: 2` and
+ * `pubtime`, the registry's own publication time (`manifest.published`) that publish-age
+ * cooldowns read; a publisher cannot choose it.
+ */
 function indexLine(m: Manifest): Json {
   const n = m.native;
   const line: Json = {
@@ -213,6 +217,7 @@ function indexLine(m: Manifest): Json {
   if (n.links !== undefined) line.links = n.links;
   if (n.rust_version !== undefined) line.rust_version = n.rust_version;
   line.v = 2;
+  if (m.published !== "") line.pubtime = m.published;
   return line;
 }
 

@@ -37,7 +37,14 @@ const VERSION_RE =
 const UNSET = "__unset";
 
 /** Fields of `composer.json` the Worker computes itself when building the index. */
-const COMPUTED_FIELDS = new Set(["version", "version_normalized", "dist", "source"]);
+const COMPUTED_FIELDS = new Set([
+  "version",
+  "version_normalized",
+  "dist",
+  "source",
+  "time",
+  "published-time",
+]);
 
 const JSON_TYPE = "application/json";
 
@@ -198,6 +205,12 @@ function indexEntry(m: Manifest, publicUrl: string): Json {
     url: distUrl(publicUrl, m.name, m.version),
     ...(archive === null ? {} : { reference: archive.sha256 }),
   };
+  // The registry's own publication time, never the publisher's: Composer's cooldown
+  // (`config.policy.cooldown`) reads `published-time`; `time` is kept consistent with it.
+  if (m.published !== "") {
+    entry.time = m.published;
+    entry["published-time"] = m.published;
+  }
   return entry;
 }
 

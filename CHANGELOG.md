@@ -10,6 +10,12 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Added
 
+- Composer p2 metadata carries `published-time` and `time` for every version, taken from the
+  registry's own publication time, so Composer 2.11's cooldown works instead of failing; a
+  `time` in `composer.json` is ignored. Cargo sparse-index lines carry `pubtime`. Reindex
+  Composer and Cargo packages to add the fields to existing versions.
+- `docs/spec.md` documents the publication-time invariant and which client field each adapter
+  fills from it.
 - Roles `yank` and `delete`: a credential can be allowed to yank or delete only the package
   versions its own grants (`yank_grants`, `delete_grants`) cover, without being an `admin`
   (who still yanks and deletes anywhere). They work with a `key`, a `gh` entry (`_:gh.<jwt>`)

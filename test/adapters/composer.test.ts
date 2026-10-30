@@ -294,6 +294,8 @@ describe("buildIndex", () => {
             version: "2.0.0",
             version_normalized: "2.0.0.0",
             dist: dist("2.0.0", "2"),
+            time: "2026-10-28T10:00:00Z",
+            "published-time": "2026-10-28T10:00:00Z",
           },
           {
             description: "second",
@@ -330,9 +332,19 @@ describe("buildIndex", () => {
         url: `${BASE}/composer/dist/acme/x/1.0.0.zip`,
         reference: "1".repeat(64),
       },
+      time: "2026-10-28T10:00:00Z",
+      "published-time": "2026-10-28T10:00:00Z",
     });
     expect(entry).not.toHaveProperty("source");
     expect(entry).not.toHaveProperty("dist.shasum");
+  });
+
+  it("takes time and published-time from the registry, not from composer.json", () => {
+    const m = manifest("1.0.0", { ...native("a"), time: "1999-01-01 00:00:00" });
+    const [p2] = adapter.buildIndex("acme/x", [m], { publicUrl: BASE });
+    const body = JSON.parse(p2?.body ?? "") as { packages: Record<string, unknown[]> };
+    const [entry] = expand(body.packages["acme/x"] ?? []);
+    expect(entry).toMatchObject({ time: m.published, "published-time": m.published });
   });
 
   it("writes an empty list when every version is yanked", () => {
@@ -360,6 +372,18 @@ describe("filterIndex", () => {
       adapter.buildIndex("acme/x", subset, ctx)[0]?.body ?? "",
     ) as unknown;
     expect(filtered).toEqual(expected);
+  });
+
+  it("keeps time and published-time on every allowed version", () => {
+    const filtered = adapter.filterIndex(full, (_name, version) => version !== "1.1.0") as {
+      packages: Record<string, unknown[]>;
+    };
+    const entries = expand(filtered.packages["acme/x"] ?? []);
+    expect(entries.map((e) => e.version)).toEqual(["2.0.0", "1.0.0"]);
+    for (const e of entries) {
+      expect(e["published-time"]).toBe("2026-10-28T10:00:00Z");
+      expect(e.time).toBe("2026-10-28T10:00:00Z");
+    }
   });
 
   it("passes the package name and version to the predicate", () => {

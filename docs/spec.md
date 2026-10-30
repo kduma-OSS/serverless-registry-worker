@@ -313,6 +313,20 @@ The Worker: runs `head()` on every object in staging, compares the size and `che
 
 In npm and Composer a yanked version is invisible, not marked – the client gets no warning, it simply stops seeing it; this is deliberately closer to the cargo semantics than to npm's `deprecated`, which only warns and still lets the version be chosen.
 
+**Publication time (cooldowns).** Client-side cooldowns (npm `min-release-age`, pnpm/Bun `minimumReleaseAge`, Yarn `npmMinimalAgeGate`, uv `exclude-newer`, Composer `config.policy.cooldown`, Cargo publish-age handling) skip versions published less than N ago, so they need a trustworthy per-version time. `manifest.published` is that time: the Worker sets it at `commit`, it is never taken from the publisher or the archive, appending files to a version does not change it, and reindexing keeps it. Each adapter puts it where its client looks:
+
+| Ecosystem | Field filled from `published`                                                     |
+| --------- | --------------------------------------------------------------------------------- |
+| npm       | packument `time[<version>]` (`created` and `modified` recomputed after filtering) |
+| Composer  | p2 `published-time` and `time` (a `time` in `composer.json` is ignored)           |
+| cargo     | sparse index line `pubtime`                                                       |
+| NuGet     | registration `catalogEntry.published`                                             |
+| Swift     | release metadata `publishedAt`                                                    |
+| generic   | version JSON `published` (also the clock for a future appcast `pubDate`)          |
+| Maven     | none: Maven has no per-version field; use the registry-side cooldown (#34)        |
+
+Composer 2.11 fails a `require`/`update` when a version has no `published-time`; own packages can be exempted with the `ignore` option of the cooldown policy, or `--no-cooldown`. Yanked versions stay out of the index as before.
+
 **Appending files to an existing version** (generic only): building `cdylib` libraries or installers in a CI matrix produces one file per job, while there is only one version. That is why `init` with `"append": true` on an existing version is allowed when (a) the adapter permits it, (b) less than `APPEND_WINDOW_HOURS` (default 24) have passed since `published`, and (c) every file name is new. A file, once committed, is immutable; `commit` appends the entries to `files[]` in the manifest (a write with `onlyIf`) and rebuilds the index. Once the window has passed, the version is closed. An alternative without a window: a job that collects the artifacts and publishes once.
 
 **Cleanup** – a cron every hour: deletes `_staging/*` entries older than 24 h and secrets whose `expires` date has passed.
