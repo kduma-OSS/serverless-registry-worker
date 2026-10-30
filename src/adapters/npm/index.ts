@@ -197,6 +197,7 @@ function versionEntry(m: Manifest, publicUrl: string): Json {
   const archive = archiveFileOf(m.files);
   return {
     ...m.native,
+    ...(m.deprecated === undefined ? {} : { deprecated: m.deprecated.message }),
     name: m.name,
     version: m.version,
     _id: `${m.name}@${m.version}`,

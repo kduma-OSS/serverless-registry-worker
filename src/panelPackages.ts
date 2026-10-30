@@ -156,6 +156,7 @@ export async function visibleVersion(
     version: manifest.version,
     published: manifest.published,
     yanked: manifest.yanked,
+    ...(manifest.deprecated === undefined ? {} : { deprecated: manifest.deprecated }),
     files,
     ...(manifest.eco === "generic" ? { meta: manifest.native } : {}),
     snippets: adapter.versionSnippets?.(publicUrl, shown, manifest.version) ?? [],

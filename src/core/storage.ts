@@ -208,7 +208,17 @@ export function isManifest(value: unknown): value is Manifest {
     typeof value.published === "string" &&
     typeof value.publishedBy === "string" &&
     typeof value.yanked === "boolean" &&
+    (value.deprecated === undefined || isDeprecation(value.deprecated)) &&
     isRecord(value.native)
+  );
+}
+
+function isDeprecation(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.message === "string" &&
+    typeof value.at === "string" &&
+    typeof value.by === "string"
   );
 }
 

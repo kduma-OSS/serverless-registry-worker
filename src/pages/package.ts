@@ -125,7 +125,7 @@ function versionList(
   const items = view.versions.map(
     (v) => markup`<li class="version-row">
 ${canRead ? markup`<a class="version" href="${versionHref(view.eco, view.name, v.version)}">${v.version}</a>` : markup`<span class="version">${v.version}</span>`}
-${v.yanked ? markup`<span class="badge warn">yanked</span>` : ""}
+${v.yanked ? markup`<span class="badge warn">yanked</span>` : ""}${v.deprecated === undefined ? "" : markup`<span class="badge warn" title="${v.deprecated.message}">deprecated</span>`}
 <span class="version-meta"><time datetime="${v.published}">${day(v.published)}</time> · ${plural(v.files.length, "file")}</span>${manage ? versionActions(view, v, actions, home) : ""}
 </li>`,
   );

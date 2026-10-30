@@ -535,6 +535,7 @@ interface PackageVersion {
   version: string;
   published: string; // RFC 3339, the first publish of the version (appends do not change it)
   yanked: boolean;
+  deprecated?: { message: string; at: string; by: string }; // present while deprecated (6.8a)
   files: PackageFile[]; // in upload order; appended files come last
 }
 
@@ -547,6 +548,7 @@ interface Manifest {
   published: string; // RFC 3339
   publishedBy: string; // [<source>.]<project> of the credential that published it
   yanked: boolean;
+  deprecated?: { message: string; at: string; by: string }; // 6.8a; absent when not deprecated
   native: Record<string, unknown>; // the init `manifest` as normalised by the adapter (generic: `meta`)
 }
 
@@ -693,6 +695,8 @@ packages depend on, as long as they are in this registry:
 | GET    | `/api/v1/packages`                                    | `read`, `yank`, `delete`, `admin` | 6.6     |
 | GET    | `/api/v1/packages/<eco>/<name>`                       | `read`, `yank`, `delete`, `admin` | 6.7     |
 | POST   | `/api/v1/packages/<eco>/<name>/<version>/yank`        | `yank`, `admin`                   | 6.8     |
+| POST   | `/api/v1/packages/<eco>/<name>/<version>/deprecate`   | `admin`                           | 6.8a    |
+| DELETE | `/api/v1/packages/<eco>/<name>/<version>/deprecate`   | `admin`                           | 6.8a    |
 | DELETE | `/api/v1/packages/<eco>/<name>/<version>`             | `delete`, `admin`                 | 6.9     |
 | DELETE | `/api/v1/packages/<eco>/<name>`                       | `delete`, `admin`                 | 6.10    |
 | POST   | `/api/v1/packages/<eco>/<name>/reindex`               | `admin`                           | 6.11    |
@@ -1302,6 +1306,24 @@ Response `200`: the `PackageVersion` plus `eco` and `name`:
 ```
 
 Errors: `404 not_found` (package or version).
+
+### 6.8a `POST` and `DELETE /api/v1/packages/<eco>/<name>/<version>/deprecate`
+
+Role `admin` only. `POST` takes `{ "message": "<text>" }` (1 to 1000 characters after trimming)
+and marks the version as deprecated, or replaces the message of a deprecated one; the manifest
+gets `deprecated: { message, at, by }` (`by` is the project of the caller). `DELETE` takes no
+body and clears the deprecation; clearing a version that is not deprecated succeeds. A
+deprecation is independent of `yanked`: the version stays in the indexes, selectable and
+downloadable. Clients are warned where the ecosystem has a concept for it: npm gets the
+`deprecated` string on the version entry of the packument, NuGet a `deprecation` object
+(`reasons: ["Other"]`, `message`) on the registration's catalog entry, and the generic feed a
+`deprecated` object on the version. Cargo, Composer, Swift and Maven have no native concept and
+show nothing; the panel marks deprecated versions in every ecosystem.
+
+Response `200`: the `PackageVersion` (with `deprecated` while set) plus `eco` and `name`.
+
+Errors: `400 invalid_request` (`message` missing, empty or too long), `404 not_found`
+(package or version).
 
 ### 6.9 `DELETE /api/v1/packages/<eco>/<name>/<version>`
 

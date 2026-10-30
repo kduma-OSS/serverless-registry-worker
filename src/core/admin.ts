@@ -5,7 +5,7 @@
  */
 
 import { getAdapter, validateRange } from "../adapters/index";
-import type { Adapter, Eco, Manifest, ManifestFile } from "../adapters/types";
+import type { Adapter, Deprecation, Eco, Manifest, ManifestFile } from "../adapters/types";
 import type { Env } from "../env";
 import { tokenPrefix } from "./config";
 import {
@@ -74,12 +74,20 @@ export interface PackageVersion {
   version: string;
   published: string;
   yanked: boolean;
+  /** Present while the version is deprecated. */
+  deprecated?: Deprecation;
   files: ManifestFile[];
 }
 
 /** The API view of a version manifest. */
 export function toPackageVersion(m: Manifest): PackageVersion {
-  return { version: m.version, published: m.published, yanked: m.yanked, files: m.files };
+  return {
+    version: m.version,
+    published: m.published,
+    yanked: m.yanked,
+    ...(m.deprecated === undefined ? {} : { deprecated: m.deprecated }),
+    files: m.files,
+  };
 }
 
 function notFound(message = "Not found."): ValidationError {
@@ -161,6 +169,49 @@ export async function yank(
   // Yanked versions stay in the graph unmarked (they keep taking part in transitive access);
   // setting the entry again only repairs a graph that missed the version.
   await setVersionDeps(env, adapter.eco, name, version, adapter.dependencies(manifest));
+  await refreshMeta(env, adapter, name, manifests, now);
+  return { eco: adapter.eco, name, ...toPackageVersion(manifest) };
+}
+
+/** The longest deprecation message accepted. */
+const MAX_DEPRECATION_MESSAGE = 1000;
+
+/**
+ * `POST /api/v1/packages/<eco>/<name>/<version>/deprecate` (`message` set) and `DELETE` on the
+ * same path (`message` `null`): sets, replaces or clears the deprecation of a version. The version
+ * stays installable and independent of `yanked`. Idempotent: clearing a version that is not
+ * deprecated changes nothing.
+ */
+export async function deprecate(
+  env: PackageAdminEnv,
+  eco: string,
+  rawName: string,
+  rawVersion: string,
+  message: string | null,
+  by: string,
+  now: Date,
+  publicUrl: string,
+): Promise<{ eco: Eco; name: string } & PackageVersion> {
+  const adapter = requireAdapter(env, eco);
+  const version = requireVersion(adapter, rawVersion);
+  const name = storedName(adapter, rawName);
+  const text = message?.trim() ?? null;
+  if (text !== null && (text === "" || text.length > MAX_DEPRECATION_MESSAGE)) {
+    invalid(`\`message\` must have 1 to ${MAX_DEPRECATION_MESSAGE} characters.`);
+  }
+  const manifest = await updateJson<Manifest>(
+    env,
+    manifestKey(adapter.eco, name, version),
+    (current) => {
+      if (current === null) throw notFound("Version not found.");
+      const { deprecated: _previous, ...rest } = current;
+      if (text === null) return _previous === undefined ? current : rest;
+      const deprecated: Deprecation = { message: text, at: rfc3339(now), by };
+      return { ...rest, deprecated };
+    },
+    { isValid: isManifest },
+  );
+  const manifests = await rebuildIndex(env, adapter, name, { publicUrl });
   await refreshMeta(env, adapter, name, manifests, now);
   return { eco: adapter.eco, name, ...toPackageVersion(manifest) };
 }

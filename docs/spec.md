@@ -311,6 +311,15 @@ The Worker: runs `head()` on every object in staging, compares the size and `che
 | Swift     | native: a `problem` field on the release in the release list, `410` for the version metadata                                           | yes – `Package.resolved` points at the version, the archive is still served                      |
 | Maven     | no native concept; here the version disappears from `maven-metadata.xml`, the files under their full path stay                         | yes – the Gradle lockfile and Maven use full paths                                               |
 
+**Deprecation** is the softer counterpart of yank: `POST /api/v1/packages/<eco>/<name>/<version>/deprecate` (`admin`, body `{ message }`; `DELETE` clears it) stores `deprecated: { message, at, by }` in the manifest and rebuilds the index. The version stays visible, selectable and downloadable, and it is independent of `yanked`. Clients are warned only where the ecosystem supports it:
+
+| Ecosystem                     | What a deprecation looks like                                                     |
+| ----------------------------- | --------------------------------------------------------------------------------- |
+| npm                           | native: `deprecated` string on the version entry of the packument (npm prints it) |
+| NuGet                         | native: `deprecation` (`reasons`, `message`) on the registration's catalog entry  |
+| generic                       | `deprecated: { message, at, by }` in the version JSON                             |
+| cargo, Composer, Swift, Maven | no native concept; shown in the panel only                                        |
+
 In npm and Composer a yanked version is invisible, not marked – the client gets no warning, it simply stops seeing it; this is deliberately closer to the cargo semantics than to npm's `deprecated`, which only warns and still lets the version be chosen.
 
 **Appending files to an existing version** (generic only): building `cdylib` libraries or installers in a CI matrix produces one file per job, while there is only one version. That is why `init` with `"append": true` on an existing version is allowed when (a) the adapter permits it, (b) less than `APPEND_WINDOW_HOURS` (default 24) have passed since `published`, and (c) every file name is new. A file, once committed, is immutable; `commit` appends the entries to `files[]` in the manifest (a write with `onlyIf`) and rebuilds the index. Once the window has passed, the version is closed. An alternative without a window: a job that collects the artifacts and publishes once.

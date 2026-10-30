@@ -158,6 +158,8 @@ export interface FeedFile {
 export interface FeedVersion {
   published: string;
   yanked: boolean;
+  /** The deprecation warning, absent for a version that is not deprecated. */
+  deprecated?: { message: string; at: string; by: string };
   meta: Json;
   files: FeedFile[];
 }
@@ -172,6 +174,7 @@ function feedVersion(m: Manifest, publicUrl: string): FeedVersion {
   return {
     published: m.published,
     yanked: m.yanked,
+    ...(m.deprecated === undefined ? {} : { deprecated: m.deprecated }),
     meta: m.native,
     files: m.files.map((f) => ({
       name: f.name,
@@ -273,7 +276,13 @@ function withLabels(entry: FeedVersion, labels: readonly [string, string][]): Fe
   const files = entry.files
     .map((f) => ({ ...f, labels: isRecord(f.labels) ? f.labels : {} }))
     .filter((f) => labels.every(([key, value]) => f.labels[key] === value));
-  return { published: entry.published, yanked: entry.yanked, meta, files };
+  return {
+    published: entry.published,
+    yanked: entry.yanked,
+    ...(entry.deprecated === undefined ? {} : { deprecated: entry.deprecated }),
+    meta,
+    files,
+  };
 }
 
 function filterIndex(

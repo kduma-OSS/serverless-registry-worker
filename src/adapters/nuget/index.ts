@@ -288,6 +288,13 @@ function catalogEntry(m: Manifest, publicUrl: string): Json {
       dependencies: g.dependencies,
     })),
   };
+  if (m.deprecated !== undefined) {
+    entry.deprecation = {
+      "@id": `${leaf}/deprecation`,
+      reasons: ["Other"],
+      message: m.deprecated.message,
+    };
+  }
   if (native.description !== undefined) entry.description = native.description;
   if (native.authors !== undefined) entry.authors = native.authors;
   if (native.tags !== undefined) entry.tags = native.tags;

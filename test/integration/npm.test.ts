@@ -16,6 +16,7 @@ interface VersionEntry {
   name: string;
   version: string;
   _id: string;
+  deprecated?: string;
   dependencies?: Record<string, string>;
   dist: { tarball: string; integrity: string };
 }
@@ -267,6 +268,33 @@ describe("npm dist-tags", () => {
     expect(Object.keys(body.time)).toEqual(["created", "modified", "1.0.0"]);
     expect(await tarball("@acme/yanked", "1.1.0", admin)).toBe(302);
     expect((await call("GET", "/npm/@acme/yanked/1.1.0", { token: admin })).status).toBe(404);
+  });
+
+  it("deprecates a version without hiding it, and clears the deprecation", async () => {
+    await publishNpm(ci, "@acme/dep", "1.0.0");
+    await publishNpm(ci, "@acme/dep", "1.1.0");
+    const url = "/api/v1/packages/npm/%40acme%2Fdep/1.0.0/deprecate";
+    expect((await call("POST", url, { token: ci, body: { message: "x" } })).status).toBe(403);
+    expect((await call("POST", url, { token: admin, body: {} })).status).toBe(400);
+    expect((await call("POST", url, { token: admin, body: { message: "  " } })).status).toBe(400);
+    const set = await call("POST", url, { token: admin, body: { message: "Use 1.1.0" } });
+    expect(set.status).toBe(200);
+    expect(await set.json()).toMatchObject({
+      version: "1.0.0",
+      yanked: false,
+      deprecated: { message: "Use 1.1.0", by: expect.any(String), at: expect.any(String) },
+    });
+    let body = await packument("@acme/dep", admin);
+    expect(body.versions["1.0.0"]?.deprecated).toBe("Use 1.1.0");
+    expect(body.versions["1.1.0"]?.deprecated).toBeUndefined();
+    expect(await tarball("@acme/dep", "1.0.0", admin)).toBe(302);
+
+    expect((await call("DELETE", url, { token: admin })).status).toBe(200);
+    expect((await call("DELETE", url, { token: admin })).status).toBe(200);
+    body = await packument("@acme/dep", admin);
+    expect(body.versions["1.0.0"]?.deprecated).toBeUndefined();
+    const missing = "/api/v1/packages/npm/%40acme%2Fdep/9.9.9/deprecate";
+    expect((await call("DELETE", missing, { token: admin })).status).toBe(404);
   });
 
   it("rebuilds the same packument on reindex", async () => {

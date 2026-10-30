@@ -305,6 +305,22 @@ describe("nuget feed", () => {
     expect(await statusOf("/nuget/flat/acme.sdk/1.0.0/acme.sdk.nuspec")).toBe(200);
   });
 
+  it("reports a deprecated version in the registration and keeps it listed", async () => {
+    const url = "/api/v1/packages/nuget/acme.sdk/1.2.0/deprecate";
+    const set = await call("POST", url, { token: admin, body: { message: "Moved to Acme.Core" } });
+    expect(set.status).toBe(200);
+    const reg = await get<Registration>("/nuget/registration/acme.sdk/index.json");
+    const entry = reg.items[0]?.items.find((l) => l.catalogEntry.version === "1.2.0")?.catalogEntry;
+    expect(entry).toMatchObject({
+      listed: true,
+      deprecation: { message: "Moved to Acme.Core" },
+    });
+    expect((await call("DELETE", url, { token: admin })).status).toBe(200);
+    const after = await get<Registration>("/nuget/registration/acme.sdk/index.json");
+    const cleared = after.items[0]?.items.find((l) => l.catalogEntry.version === "1.2.0");
+    expect(cleared?.catalogEntry).not.toHaveProperty("deprecation");
+  });
+
   it("accepts Bearer and Basic credentials and challenges with both", async () => {
     expect((await call("GET", "/nuget/index.json", { token: reader })).status).toBe(200);
     const anonymous = await call("GET", "/nuget/index.json");

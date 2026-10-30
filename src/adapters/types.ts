@@ -73,6 +73,15 @@ export function isManifestFile(value: unknown): value is ManifestFile {
   );
 }
 
+/** Why a version is deprecated: the warning shown to clients, when and by whom it was set. */
+export interface Deprecation {
+  message: string;
+  /** RFC 3339 timestamp. */
+  at: string;
+  /** `[<source>.]<project>` of the credential that deprecated the version. */
+  by: string;
+}
+
 /**
  * Normalised version manifest stored at `<eco>/pkg/<name>/<version>/manifest.json`. It is the
  * only durable data contract: indexes are always rebuilt from manifests.
@@ -89,6 +98,11 @@ export interface Manifest {
   /** `[<source>.]<project>` of the credential that published the version. */
   publishedBy: string;
   yanked: boolean;
+  /**
+   * Set by an admin: the version still works and stays selectable, but clients are warned where
+   * the ecosystem supports it. Independent of `yanked`. Absent when not deprecated.
+   */
+  deprecated?: Deprecation;
   /** Whatever the adapter needs to reproduce the version's entry in the index. */
   native: Record<string, unknown>;
   /**

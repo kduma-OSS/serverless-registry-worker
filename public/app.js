@@ -173,6 +173,9 @@
       const expires = value(form, "expires");
       return expires === "" ? undefined : { expires: expires };
     },
+    deprecate: function (form) {
+      return { message: value(form, "message") };
+    },
     describe: function (form) {
       // An empty description clears it.
       return { description: value(form, "description") };

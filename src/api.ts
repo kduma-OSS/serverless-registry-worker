@@ -11,6 +11,7 @@ import {
   deletePackage,
   updateSecret,
   deleteVersion,
+  deprecate,
   expireSecret,
   listCredentialViews,
   readCredentialView,
@@ -211,6 +212,43 @@ const routes = new Router<ApiRoute>()
       requireMayModify(c, "yank", p(c, "eco"), p(c, "name"), p(c, "version"));
       return ok(await yank(c.env, p(c, "eco"), p(c, "name"), p(c, "version"), c.now, c.publicUrl));
     },
+  })
+  .add("POST", "/api/v1/packages/:eco/:name/:version/deprecate", {
+    auth: ADMIN,
+    handler: async (c) => {
+      const message = c.body.message;
+      if (typeof message !== "string") {
+        throw new ValidationError("invalid_request", "`message` must be a string.");
+      }
+      return ok(
+        await deprecate(
+          c.env,
+          p(c, "eco"),
+          p(c, "name"),
+          p(c, "version"),
+          message,
+          c.identity.project,
+          c.now,
+          c.publicUrl,
+        ),
+      );
+    },
+  })
+  .add("DELETE", "/api/v1/packages/:eco/:name/:version/deprecate", {
+    auth: ADMIN,
+    handler: async (c) =>
+      ok(
+        await deprecate(
+          c.env,
+          p(c, "eco"),
+          p(c, "name"),
+          p(c, "version"),
+          null,
+          c.identity.project,
+          c.now,
+          c.publicUrl,
+        ),
+      ),
   })
   .add("DELETE", "/api/v1/packages/:eco/:name/:version", {
     auth: DELETERS,

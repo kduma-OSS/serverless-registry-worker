@@ -18,6 +18,7 @@ import {
   plural,
   snippetList,
 } from "./catalog";
+import { apiButton, apiPath } from "./admin";
 import { formatBytes } from "./components";
 import type { PackageGroups } from "../core/groups";
 import { markup, type SafeHtml } from "./html";
@@ -42,6 +43,8 @@ export interface VersionPageData {
   version: string;
   published: string;
   yanked: boolean;
+  /** The deprecation warning, absent for a version that is not deprecated. */
+  deprecated?: { message: string; at: string; by: string };
   files: VersionFile[];
   /** Generic: the version's free-form `meta` (the manifest's `native`). */
   meta?: Record<string, unknown>;
@@ -91,6 +94,33 @@ ${snippetList(snippets, "pin")}
 </details>`;
 }
 
+/** The admin's form to deprecate a version, or to remove its deprecation. */
+function deprecationForm(data: VersionPageData): SafeHtml {
+  const url = `${apiPath("packages", data.eco, data.name, data.version)}/deprecate`;
+  const label = `${data.name} ${data.version}`;
+  const clear =
+    data.deprecated === undefined
+      ? ""
+      : apiButton(
+          "Remove deprecation",
+          "DELETE",
+          url,
+          { message: `Remove the deprecation of ${label}?` },
+          { ariaLabel: `Remove the deprecation of ${label}` },
+        );
+  return markup`<section class="pkg-section" aria-labelledby="deprecation">
+<h2 id="deprecation">Deprecation</h2>
+<p class="hint">A deprecated version stays installable; clients that support it show the message.</p>
+<form class="inline-form" data-api-form="deprecate" data-api-method="POST" data-api-url="${url}">
+<label for="deprecate-message">Message</label>
+<input type="text" id="deprecate-message" name="message" maxlength="1000" required value="${data.deprecated?.message ?? ""}">
+<button type="submit" class="secondary small">${data.deprecated === undefined ? "Deprecate" : "Update message"}</button>
+<p class="error" role="alert" data-form-error hidden></p>
+</form>
+${clear}
+</section>`;
+}
+
 /** The version page. */
 export function versionPage(ctx: PageContext, data: VersionPageData): string {
   const pkg = packageHref(data.eco, data.name);
@@ -98,6 +128,11 @@ export function versionPage(ctx: PageContext, data: VersionPageData): string {
   const yanked = data.yanked
     ? markup`<p class="hint"><span class="badge warn">yanked</span> This version is no longer offered to dependency resolution; existing lockfiles can still download it.</p>`
     : "";
+  const deprecated =
+    data.deprecated === undefined
+      ? ""
+      : markup`<p class="hint"><span class="badge warn">deprecated</span> ${data.deprecated.message}</p>`;
+  const manage = admin ? deprecationForm(data) : "";
   return layout(
     ctx,
     `${data.name} ${data.version}`,
@@ -113,6 +148,7 @@ ${ecoBadge(data.eco)}
 <h1>${data.name} <span class="version">${data.version}</span></h1>
 <p class="pkg-meta">Published <time datetime="${data.published}">${day(data.published)}</time> · ${plural(data.files.length, "file")}</p>
 ${yanked}
+${deprecated}
 </header>
 <section class="pkg-section" aria-labelledby="files">
 <h2 id="files">Files</h2>
@@ -125,6 +161,7 @@ ${data.files.map((file) => fileRow(data, file))}
 </section>
 ${metadataSection(data.meta)}
 ${getThisVersion(data)}
+${manage}
 ${backLink(pkg, data.name)}
 </div>`,
     { page: "version", section: "packages" },

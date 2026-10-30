@@ -10,6 +10,12 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Added
 
+- Deprecating a version: an admin can mark a version deprecated with a message
+  (`POST /api/v1/packages/<eco>/<name>/<version>/deprecate`, cleared with `DELETE`), separately
+  from yank. The version stays installable; npm shows the `deprecated` string, NuGet the
+  registration's `deprecation`, the generic feed a `deprecated` field, and the panel a badge and
+  a form on the version page. Additive: no data migration.
+
 - Roles `yank` and `delete`: a credential can be allowed to yank or delete only the package
   versions its own grants (`yank_grants`, `delete_grants`) cover, without being an `admin`
   (who still yanks and deletes anywhere). They work with a `key`, a `gh` entry (`_:gh.<jwt>`)
