@@ -271,7 +271,7 @@ The Worker sees only metadata and one `head()` per file; if an object in staging
 }
 ```
 
-The Worker: checks the `publish` grant for the package and version, rejects with `409` if the `manifest.json` of this version exists, writes `_staging/<upload-id>/meta.json` and returns:
+The Worker: checks the `publish` grant for the package and version, rejects with `409` if the `manifest.json` of this version exists, writes `_staging/<upload-id>/meta.json` and returns (optionally with informational `warnings` when the name is shared with, or easily mistaken for, a public registry's; they never block the publish):
 
 ```json
 {

@@ -21,6 +21,17 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Changed
 
+- The client configuration the panel and the message for a new secret's owner show is now safe
+  against dependency confusion by default. Composer repositories are `"canonical": true`, so
+  names found here are never looked up on Packagist; the NuGet `nuget.config` carries a
+  `packageSourceMapping` that pins the granted IDs to the registry; the Gradle snippets wrap
+  the repository in `exclusiveContent` with `includeGroup` for the granted groups; the Swift
+  commands map every granted scope to the registry. The npm, Cargo and Maven snippets explain
+  the remaining risks (unscoped names, a missing `registry`, Maven's lack of content filters).
+- `POST /api/v1/publish/init` may return an optional, informational `warnings` list when a
+  package name is shared with, or easily mistaken for, a public registry's. It never blocks
+  the publish.
+
 - A yank or delete login (`purpose` `yank` / `delete`) is also approved by a credential that
   holds the `yank` / `delete` role and whose grants cover every operation; its token carries
   that role instead of `admin`.

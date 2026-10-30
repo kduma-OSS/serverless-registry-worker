@@ -665,17 +665,31 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   const parts = splitIdentity(id);
   const product = parts?.name ?? "Networking";
   const scope = parts?.scope ?? "acme";
+  // One scope-to-registry mapping per scope the secret can read: a scope mapped here is never
+  // resolved from another registry (dependency confusion).
+  const scopes = [
+    ...new Set(
+      [...packages].sort().flatMap((p) => {
+        const s = splitIdentity(p)?.scope;
+        return s === undefined ? [] : [s];
+      }),
+    ),
+  ];
+  if (scopes.length === 0) scopes.push(scope);
+  const setScopes = scopes
+    .map((s) => `swift package-registry set ${registry} --scope ${s}\n`)
+    .join("");
   return [
     {
       title: "Configure the registry",
       description:
-        "Use the registry for the package's scope and store the credentials in your keychain (or .netrc).",
+        "Map the package's scope to the registry (scoped, so packages of that scope are never resolved from another registry) and store the credentials in your keychain (or .netrc).",
       group: "Set up the registry",
       variant: "Command",
       filename: "terminal",
       language: "shell",
       body:
-        `swift package-registry set ${registry} --scope ${scope}\n` +
+        setScopes +
         `swift package-registry login ${registry} --username ${login} --password ${password}\n` +
         `# or send the token as a Bearer credential:\n` +
         `# swift package-registry login ${registry} --token ${token}\n`,
@@ -689,7 +703,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
       filename: "terminal",
       language: "shell",
       body:
-        `swift package-registry set ${registry} --scope ${scope}\n` +
+        setScopes +
         `swift package-registry login ${registry} --username ${login} --password "$REGISTRY_TOKEN"\n`,
     },
     {

@@ -565,6 +565,32 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     groupId: "com.acme",
     artifactId: "sdk",
   };
+  // The groups the secret can read; Gradle only looks them up here (dependency confusion).
+  const groups = [
+    ...new Set(
+      packages.flatMap((name) => {
+        const c = splitCoordinates(name);
+        return c === null ? [] : [c.groupId];
+      }),
+    ),
+  ].sort();
+  if (groups.length === 0) groups.push(coords.groupId);
+  const gradleRepository = (credentials: string) =>
+    `repositories {\n` +
+    `    exclusiveContent {\n` +
+    `        forRepository {\n` +
+    `            maven {\n` +
+    `                url = uri("${repository}")\n` +
+    `                credentials {\n` +
+    credentials +
+    `                }\n` +
+    `            }\n` +
+    `        }\n` +
+    `        filter {\n` +
+    groups.map((g) => `            includeGroup("${g}")\n`).join("") +
+    `        }\n` +
+    `    }\n` +
+    `}\n`;
   return [
     {
       title: "Maven credentials",
@@ -578,7 +604,8 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     },
     {
       title: "Maven repository",
-      description: "Add the repository and the dependency to the project's pom.xml.",
+      description:
+        "Add the repository and the dependency to the project's pom.xml. Maven has no per-repository content filter: to keep a public artifact of the same coordinates from being picked, declare these groups only here, consider a mirror with <mirrorOf> that routes everything else to a trusted proxy, or enforce it with the maven-enforcer-plugin.",
       group: "Build tool",
       variant: "Maven",
       filename: "pom.xml",
@@ -601,21 +628,17 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     {
       title: "Gradle (Kotlin DSL)",
       description:
-        "With Gradle, add the repository with its credentials and the dependency to build.gradle.kts.",
+        "With Gradle, add the repository with its credentials and the dependency to build.gradle.kts. exclusiveContent makes the listed groups resolve only from this repository and never from any other (dependency confusion).",
       group: "Build tool",
       variant: "Gradle",
       filename: "build.gradle.kts",
       language: "kotlin",
       body:
-        `repositories {\n` +
-        `    maven {\n` +
-        `        url = uri("${repository}")\n` +
-        `        credentials {\n` +
-        `            username = "${login}"\n` +
-        `            password = "${password}"\n` +
-        `        }\n` +
-        `    }\n` +
-        `}\n\n` +
+        gradleRepository(
+          `                    username = "${login}"\n` +
+            `                    password = "${password}"\n`,
+        ) +
+        `\n` +
         `dependencies {\n` +
         `    implementation("${coords.groupId}:${coords.artifactId}:1.0.0")\n` +
         `}\n`,
@@ -638,16 +661,10 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
       variant: "Environment variables",
       filename: "build.gradle.kts",
       language: "kotlin",
-      body:
-        `repositories {\n` +
-        `    maven {\n` +
-        `        url = uri("${repository}")\n` +
-        `        credentials {\n` +
-        `            username = System.getenv("REGISTRY_LOGIN")\n` +
-        `            password = System.getenv("REGISTRY_TOKEN")\n` +
-        `        }\n` +
-        `    }\n` +
-        `}\n`,
+      body: gradleRepository(
+        `                    username = System.getenv("REGISTRY_LOGIN")\n` +
+          `                    password = System.getenv("REGISTRY_TOKEN")\n`,
+      ),
     },
   ];
 }

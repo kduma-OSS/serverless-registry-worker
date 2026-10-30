@@ -380,7 +380,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     {
       title: "Configure with npm",
       description:
-        "Write the scope's registry and the token into your user ~/.npmrc (add --location=project for the project's .npmrc, and keep that out of version control).",
+        "Write the scope's registry and the token into your user ~/.npmrc (add --location=project for the project's .npmrc, and keep that out of version control). Only the scope is routed here: never point the unscoped registry at this server (it does not mirror npmjs), and do not use unscoped names for private packages, as anyone can publish them on npmjs.",
       group,
       variant: "Command",
       filename: "terminal",

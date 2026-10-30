@@ -22,6 +22,7 @@ import { appendWindowHours, maxUploadBytes, presignConfig } from "./config";
 import { ValidationError } from "./errors";
 import { foldCase, isAllowed } from "./grants";
 import { presignPut, sha256HexToBase64 } from "./presign";
+import { publicNameWarnings } from "./publicNames";
 import {
   addPackageToMeta,
   packageMetaEntry,
@@ -88,6 +89,8 @@ export interface InitResponse {
   /** RFC 3339: when the presigned URLs stop working. */
   expires: string;
   uploads: UploadTarget[];
+  /** Informational dependency-confusion hints; omitted when there are none. Never blocking. */
+  warnings?: string[];
 }
 
 /** Response of `POST /api/v1/publish/commit`. */
@@ -328,7 +331,13 @@ export async function init(
     expires: rfc3339(expires),
   };
   await writeStagingMeta(env, uploadId, meta);
-  return { uploadId, expires: rfc3339(expires), uploads };
+  const warnings = publicNameWarnings(parsed.eco, parsed.name);
+  return {
+    uploadId,
+    expires: rfc3339(expires),
+    uploads,
+    ...(warnings.length > 0 ? { warnings } : {}),
+  };
 }
 
 function toHex(buffer: ArrayBuffer): string {

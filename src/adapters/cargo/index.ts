@@ -386,7 +386,8 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     },
     {
       title: "Cargo.toml",
-      description: "Depend on the crates from this registry in the project's Cargo.toml.",
+      description:
+        "Depend on the crates from this registry in the project's Cargo.toml. Keep registry on every dependency on a private crate: without it Cargo resolves the name against crates.io, where anyone can publish a crate of the same name (dependency confusion).",
       filename: "Cargo.toml",
       language: "toml",
       body: `[dependencies]\n${dependencyLines}`,

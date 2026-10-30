@@ -513,12 +513,12 @@ describe("clientConfig", () => {
       `export COMPOSER_AUTH='{"http-basic":{"packages.example.com":{"username":"shop-frontend","password":"k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e"}}}'\n`,
     );
     expect(snippets[0]?.body).toBe(
-      `composer config repositories.sreg composer ${BASE}/composer\n` +
+      `composer config repositories.sreg --json '{"type":"composer","url":"${BASE}/composer","canonical":true}'\n` +
         "composer config http-basic.packages.example.com shop-frontend k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e\n",
     );
     for (const i of [1, 3]) {
       expect(body(i)).toEqual({
-        repositories: [{ type: "composer", url: `${BASE}/composer` }],
+        repositories: [{ type: "composer", url: `${BASE}/composer`, canonical: true }],
       });
     }
     expect(body(2)).toEqual({ bearer: { "packages.example.com": token } });
@@ -539,6 +539,7 @@ describe("clientConfig", () => {
         {
           type: "composer",
           url: "https://shop-frontend:k7Qx2mN9pLw4vR8sT1bYc3dF6hJ0aZ5e@packages.example.com/composer",
+          canonical: true,
         },
       ],
     });

@@ -1024,6 +1024,7 @@ Response `200`:
 | `uploadId` | string   | opaque identifier, `[A-Za-z0-9_-]{16,64}`; pass it to `commit`             |
 | `expires`  | string   | when every `putUrl` of this upload stops working (10 minutes after `init`) |
 | `uploads`  | object[] | one entry per file of the request, in the same order                       |
+| `warnings` | string[] | optional; informational dependency-confusion hints, never blocking         |
 
 Each entry of `uploads`:
 

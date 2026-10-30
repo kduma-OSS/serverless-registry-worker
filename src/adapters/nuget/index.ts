@@ -581,7 +581,26 @@ function xmlAttr(value: string): string {
 }
 
 /** A `nuget.config` with the source `sreg` and its clear-text credentials. */
-function nugetConfig(source: string, login: string, password: string): string {
+/**
+ * `<packageSourceMapping>` that pins the granted package IDs to `sreg` (the most specific
+ * pattern wins) and leaves everything else to nuget.org, so a public package of the same ID
+ * is never picked (dependency confusion). Without known IDs a placeholder prefix is shown.
+ */
+function sourceMapping(packages: string[]): string {
+  const ids = packages.length > 0 ? [...packages].sort() : ["Acme.*"];
+  return (
+    `  <packageSourceMapping>\n` +
+    `    <packageSource key="sreg">\n` +
+    ids.map((id) => `      <package pattern="${xmlAttr(id)}" />\n`).join("") +
+    `    </packageSource>\n` +
+    `    <packageSource key="nuget.org">\n` +
+    `      <package pattern="*" />\n` +
+    `    </packageSource>\n` +
+    `  </packageSourceMapping>\n`
+  );
+}
+
+function nugetConfig(source: string, login: string, password: string, packages: string[]): string {
   return (
     `<?xml version="1.0" encoding="utf-8"?>\n` +
     `<configuration>\n` +
@@ -594,6 +613,7 @@ function nugetConfig(source: string, login: string, password: string): string {
     `      <add key="ClearTextPassword" value="${xmlAttr(password)}" />\n` +
     `    </sreg>\n` +
     `  </packageSourceCredentials>\n` +
+    sourceMapping(packages) +
     `</configuration>\n`
   );
 }
@@ -608,7 +628,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     {
       title: "Add the package source",
       description:
-        "Add the registry as the package source sreg to your user-wide NuGet configuration.",
+        "Add the registry as the package source sreg to your user-wide NuGet configuration. This command cannot pin package IDs: also add the packageSourceMapping from the nuget.config below, or a public package with the same ID may be installed instead.",
       group: "Set up the registry",
       variant: "Command",
       filename: "terminal",
@@ -620,12 +640,12 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     {
       title: "nuget.config",
       description:
-        "Declare the source in a nuget.config next to the solution instead; keep the credentials out of version control.",
+        "Declare the source in a nuget.config next to the solution instead; keep the credentials out of version control. The packageSourceMapping makes these package IDs come only from sreg (dependency confusion); nuget.org stays the source for everything else.",
       group: "Set up the registry",
       variant: "nuget.config",
       filename: "nuget.config",
       language: "xml",
-      body: nugetConfig(source, login, password),
+      body: nugetConfig(source, login, password, packages),
     },
     {
       title: "nuget.config with the token from the environment",
@@ -635,7 +655,7 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
       variant: "Environment variables",
       filename: "nuget.config",
       language: "xml",
-      body: nugetConfig(source, login, "%REGISTRY_TOKEN%"),
+      body: nugetConfig(source, login, "%REGISTRY_TOKEN%", packages),
     },
     {
       title: "Add the package source with the token from the environment",

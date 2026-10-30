@@ -356,11 +356,15 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
   const withToken = new URL(`${base}/composer`);
   withToken.username = login;
   withToken.password = password;
-  const repository = (url: string) => ({ repositories: [{ type: "composer", url }] });
+  // `canonical: true` (Composer's default, kept explicit) means a package found here is never
+  // looked up on Packagist, which is what defeats dependency confusion.
+  const repositoryEntry = (url: string) => ({ type: "composer", url, canonical: true });
+  const repository = (url: string) => ({ repositories: [repositoryEntry(url)] });
   const group = "Set up the registry";
   const composerJson = (variant: string): Snippet => ({
     title: "composer.json",
-    description: "Add the registry to the project's composer.json.",
+    description:
+      'Add the registry to the project\'s composer.json; "canonical": true keeps the packages found here from ever being looked up on Packagist (dependency confusion).',
     group,
     variant,
     filename: "composer.json",
@@ -371,13 +375,13 @@ function clientConfig(baseUrl: string, token: string, packages: string[]): Snipp
     {
       title: "Configure with Composer",
       description:
-        "Add the registry to the project's composer.json and the token to its auth.json (Composer always writes http-basic credentials to auth.json; add --global to both commands for every project); keep auth.json out of version control.",
+        "Add the registry to the project's composer.json and the token to its auth.json (Composer always writes http-basic credentials to auth.json; add --global to both commands for every project); keep auth.json out of version control. The repository is canonical, so its packages are never looked up on Packagist.",
       group,
       variant: "Command",
       filename: "terminal",
       language: "shell",
       body:
-        `composer config repositories.sreg composer ${base}/composer\n` +
+        `composer config repositories.sreg --json '${JSON.stringify(repositoryEntry(`${base}/composer`))}'\n` +
         `composer config http-basic.${host} ${login} ${password}\n`,
     },
     composerJson("Bearer (auth.json)"),
