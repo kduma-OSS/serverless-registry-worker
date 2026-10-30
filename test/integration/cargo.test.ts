@@ -179,6 +179,7 @@ describe("cargo native reads", () => {
     const lines = await indexLines("ac/me/acme-core", admin);
     const sha = await sha256Hex(crateBytes("acme-core", "1.5.0"));
     expect(lines[2]).toEqual({
+      pubtime: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/),
       name: "acme-core",
       vers: "1.5.0",
       deps: [dep("acme-util", "^0.2"), dep("serde", "^1.0", CRATES_IO)],
