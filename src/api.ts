@@ -5,6 +5,7 @@
  */
 
 import type { Eco } from "./adapters/types";
+import { backfillDigests } from "./core/backfill";
 import {
   addSecret,
   createCredential,
@@ -233,6 +234,11 @@ const routes = new Router<ApiRoute>()
   .add("POST", "/api/v1/packages/:eco/:name/reindex", {
     auth: ADMIN,
     handler: async (c) => ok(await reindex(c.env, p(c, "eco"), p(c, "name"), c.now, c.publicUrl)),
+  })
+  .add("POST", "/api/v1/packages/:eco/:name/:version/backfill-digests", {
+    auth: ADMIN,
+    handler: async (c) =>
+      ok(await backfillDigests(c.env, p(c, "eco"), p(c, "name"), p(c, "version"))),
   })
   .add("GET", "/api/v1/credentials", {
     auth: ADMIN,

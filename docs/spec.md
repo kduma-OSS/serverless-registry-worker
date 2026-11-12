@@ -220,7 +220,7 @@ The package name in the key is encoded safely: `/` and `@` in composer/npm names
 
 `native` is literally what the adapter needs to reproduce the entry in the index: for composer the whole `composer.json` of the version, for npm the `versions[v]` entry of the packument, for cargo the index line (`deps`, `features`, `cksum`).
 
-`files[].digests` (optional): additional digests besides `sha256`, e.g. `{ "sha1": "…", "md5": "…" }`, needed by ecosystems whose clients verify other algorithms (Maven). The adapter declares in `init` the list of required algorithms (`digests: ["sha1", "md5"]`), and the Worker computes them at `commit` while streaming the object from staging to its target key, and stores them in the manifest. Without a declaration by the adapter nothing is computed; `reindex` does not recompute digests. The `sha256` field stays mandatory and separate: it is the only digest that the CLI computes before sending, that the Worker enforces in the presign (`x-amz-checksum-sha256`) and checks at `commit`, so it is the proof of the upload's integrity, while `digests` are only derivatives for clients.
+`files[].digests` (optional): additional digests besides `sha256`, e.g. `{ "sha1": "…", "md5": "…" }`, needed by ecosystems whose clients verify other algorithms (Maven). The adapter declares in `init` the list of required algorithms (`digests: ["sha1", "md5"]`), and the Worker computes them at `commit` while streaming the object from staging to its target key, and stores them in the manifest. Without a declaration by the adapter nothing is computed; `reindex` does not recompute digests. The `sha256` field stays mandatory and separate: it is the only digest that the CLI computes before sending, that the Worker enforces in the presign (`x-amz-checksum-sha256`) and checks at `commit`, so it is the proof of the upload's integrity, while `digests` are only derivatives for clients. Composer requests `sha1` and exposes it as `dist.shasum`; Maven requests `sha1`, `md5` and `sha512`. An explicit admin backfill may enrich existing manifests with missing adapter-declared digests, after verifying the stored bytes against their size and SHA-256. This does not change the release artifacts or publication metadata.
 
 **Keys in KV**
 
@@ -364,6 +364,8 @@ interface Adapter {
 | `GET /composer/dist/<vendor>/<pkg>/<version>.zip`                 | `302` → presigned GET (15 min)                                                                                  |
 
 Client: `auth.json` with `bearer` or `http-basic` and `repositories: [{ type: composer, url: https://<domain>/composer }]`, or without `auth.json`, with the token in the URL: `https://<token>@<domain>/composer` (Composer extracts the userinfo as `http-basic`). npm and cargo do not support credentials in the URL.
+
+Composer archives have `dist.reference` equal to their SHA-256 and, when available, `dist.shasum` equal to their SHA-1 (40 lower-case hex characters). Composer verifies downloaded ZIPs against `shasum`; `reference` alone does not enable checksum verification. Legacy versions omit `shasum` until an administrator backfills their digests and rebuilds the index. Client-supplied `dist`, `source` and file digests cannot override these computed values.
 
 **npm** (`/npm/…`)
 
