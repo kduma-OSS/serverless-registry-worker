@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { base64UrlDecode, base64UrlEncode } from "../../src/core/signing";
 import {
   base32Decode,
   base32Encode,
@@ -116,7 +117,13 @@ describe("stored secrets", () => {
   it("does not decrypt with another SESSION_SECRET or a damaged value", async () => {
     const stored = await encryptTotpSecret(env, "JBSWY3DPEHPK3PXP");
     expect(await decryptTotpSecret({ SESSION_SECRET: "other" }, stored)).toBeNull();
-    expect(await decryptTotpSecret(env, `${stored.slice(0, -2)}AA`)).toBeNull();
+    const damaged = stored.split(".");
+    const ciphertext = base64UrlDecode(damaged[2] ?? "");
+    if (ciphertext === null || ciphertext.length === 0) throw new Error("Ciphertext missing");
+    // Replacing a Base64 suffix can leave randomly generated ciphertext unchanged.
+    ciphertext[0] = (ciphertext[0] ?? 0) ^ 1;
+    damaged[2] = base64UrlEncode(ciphertext);
+    expect(await decryptTotpSecret(env, damaged.join("."))).toBeNull();
     expect(await decryptTotpSecret(env, "v2.a.b")).toBeNull();
     expect(await decryptTotpSecret(env, "nonsense")).toBeNull();
   });
