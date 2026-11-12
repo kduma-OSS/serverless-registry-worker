@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
-import { stagingKey } from "../../src/core/storage";
+import { manifestKey, readManifest, stagingKey } from "../../src/core/storage";
 import { metadataFromNuspec, nuspecFor } from "../fixtures/nuget/nuspec";
 import { ORIGIN, call, credential, sha256Hex, type ErrorBody, type InitResult } from "./helpers";
 
@@ -319,5 +319,70 @@ describe("nuget feed", () => {
     expect(wrong.status).toBe(401);
     expect(await statusOf("/nuget/index.json", ci)).toBe(403);
     expect((await call("POST", "/nuget/index.json", { token: reader })).status).toBe(404);
+  });
+});
+
+describe("nuget archive checksums", () => {
+  const path = "/nuget/flat/acme.sdk/1.0.0/acme.sdk.1.0.0.nupkg.sha512";
+
+  async function expectedHash(): Promise<string> {
+    const bytes = new TextEncoder().encode("Acme.Sdk@1.0.0");
+    const digest = await crypto.subtle.digest("SHA-512", bytes);
+    return btoa(String.fromCharCode(...new Uint8Array(digest)));
+  }
+
+  it("computes and serves SHA-512 with authentication, grants and private caching", async () => {
+    const res = await call("GET", path, { headers: basic(reader) });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(await res.text()).toBe(await expectedHash());
+    expect((await call("GET", path)).status).toBe(401);
+    expect(await statusOf(path, ci)).toBe(403);
+    expect(await statusOf(path.replaceAll("1.0.0", "2.0.0"))).toBe(404);
+    expect(await statusOf(path.replaceAll("1.0.0", "9.0.0"), admin)).toBe(404);
+    expect(await statusOf("/nuget/flat/acme.core/1.5.0/acme.core.1.5.0.nupkg.sha512")).toBe(200);
+    const list = await get<{ versions: string[] }>("/nuget/flat/acme.sdk/index.json");
+    expect(Object.keys(list)).toEqual(["versions"]);
+  });
+
+  it("backfills legacy manifests and serves the checksum after reindex without changing archives", async () => {
+    const original = await readManifest(env, "nuget", "acme.sdk", "1.0.0");
+    if (original === null) throw new Error("Manifest missing");
+    const legacy = {
+      ...original,
+      files: original.files.map((file) => {
+        const copy = { ...file };
+        delete copy.digests;
+        return copy;
+      }),
+    };
+    const key = manifestKey("nuget", "acme.sdk", "1.0.0");
+    const reindex = () => call("POST", "/api/v1/packages/nuget/acme.sdk/reindex", { token: admin });
+    try {
+      await env.R2_BUCKET.put(key, JSON.stringify(legacy));
+      expect((await reindex()).status).toBe(200);
+      expect(await statusOf(path)).toBe(404);
+      const backfill = await call("POST", "/api/v1/packages/nuget/ACME.SDK/1.0/backfill-digests", {
+        token: admin,
+      });
+      expect(backfill.status).toBe(200);
+      expect(await backfill.json()).toMatchObject({ updated: true });
+      expect(await statusOf(path)).toBe(404);
+      expect((await reindex()).status).toBe(200);
+      const res = await call("GET", path, { headers: basic(reader) });
+      expect(await res.text()).toBe(await expectedHash());
+      const filled = await readManifest(env, "nuget", "acme.sdk", "1.0.0");
+      expect(filled).toEqual(original);
+      const archive = await env.R2_BUCKET.get("nuget/pkg/acme.sdk/1.0.0/acme.sdk.1.0.0.nupkg");
+      expect(await archive?.text()).toBe("Acme.Sdk@1.0.0");
+      const again = await call("POST", "/api/v1/packages/nuget/acme.sdk/1.0.0/backfill-digests", {
+        token: admin,
+      });
+      expect(await again.json()).toMatchObject({ updated: false });
+    } finally {
+      await env.R2_BUCKET.put(key, JSON.stringify(original));
+      await reindex();
+    }
   });
 });

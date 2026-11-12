@@ -10,6 +10,11 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Added
 
+- NuGet publications compute SHA-512 and expose the Base64 archive checksum at
+  `.nupkg.sha512`, with the same read grants as the package. Existing versions can use
+  digest backfill followed by reindex. This does not change NuGet's lock-file or signature
+  verification behavior.
+
 - Composer archives include `dist.shasum` (SHA-1) so Composer verifies downloaded ZIPs,
   while SHA-256 remains the upload integrity check. Existing versions can be enriched with
   the admin-only `backfill-digests` endpoint and the resumable

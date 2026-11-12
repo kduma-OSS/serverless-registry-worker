@@ -265,6 +265,8 @@ function dependencies(m: Manifest): Dependency[] {
 interface StoredFlat {
   name: string;
   versions: string[];
+  /** Raw archive SHA-512 digests, lower-case hex; absent in older indexes. */
+  sha512?: Record<string, string>;
 }
 
 /** The stored `.nuspec` files: `{ name, nuspecs: { <version>: <xml> } }`. */
@@ -327,7 +329,17 @@ function buildIndex(name: string, manifests: Manifest[], ctx: IndexContext): Ind
   const sorted = manifests
     .filter((m) => m.name.toLowerCase() === id)
     .sort((a, b) => compareNuGetVersions(a.version, b.version));
-  const flat: StoredFlat = { name: id, versions: sorted.map((m) => m.version) };
+  const hashes = Object.fromEntries(
+    sorted.flatMap((m) => {
+      const digest = archiveFileOf(m.files)?.digests?.sha512;
+      return digest === undefined ? [] : [[m.version, digest]];
+    }),
+  );
+  const flat: StoredFlat = {
+    name: id,
+    versions: sorted.map((m) => m.version),
+    ...(Object.keys(hashes).length === 0 ? {} : { sha512: hashes }),
+  };
   const nuspecs: StoredNuspecs = {
     name: id,
     nuspecs: Object.fromEntries(sorted.map((m) => [m.version, nativeOf(m).nuspec])),
@@ -407,6 +419,16 @@ function filterIndex(
     return new RawIndexBody(nuspec, XML_TYPE);
   }
   if (Array.isArray(body.versions)) {
+    if (route?.view === "sha512") {
+      const version = route.selector?.version;
+      if (version === undefined || !body.versions.includes(version) || !allowed(name, version)) {
+        notFound();
+      }
+      const hash = isRecord(body.sha512) ? body.sha512[version] : undefined;
+      if (typeof hash !== "string" || !/^[0-9a-f]{128}$/.test(hash)) notFound();
+      const bytes = hash.match(/../g)?.map((pair) => parseInt(pair, 16)) ?? [];
+      return new RawIndexBody(btoa(String.fromCharCode(...bytes)), "text/plain; charset=utf-8");
+    }
     const versions = body.versions.filter(
       (v): v is string => typeof v === "string" && allowed(name, v),
     );
@@ -488,6 +510,15 @@ function route(req: Request, url: URL): NativeRoute | null {
         kind: "index",
         key: nugetIndexKey(id, "nuspec.json"),
         name: id,
+        selector: { version },
+      };
+    }
+    if (fileName === `${id}.${ver.toLowerCase()}.nupkg.sha512`) {
+      return {
+        kind: "index",
+        key: nugetIndexKey(id, "flat.json"),
+        name: id,
+        view: "sha512",
         selector: { version },
       };
     }
@@ -680,6 +711,7 @@ function versionSnippets(_baseUrl: string, name: string, version: string): Snipp
 /** The NuGet adapter. */
 export const nugetAdapter: Adapter = {
   eco: "nuget",
+  digests: ["sha512"],
   parseManifest,
   fileKey: (m, file) => fileKey("nuget", m.name.toLowerCase(), m.version, file.name),
   storedName: (name) => name.toLowerCase(),

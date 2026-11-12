@@ -761,6 +761,25 @@ refresh dependency metadata and commit the updated lock file to enable checksum 
 for previously locked packages. SHA-1 is for Composer compatibility; SHA-256 remains the
 registry's upload integrity check.
 
+### NuGet archive checksums
+
+New NuGet publications compute SHA-512 in addition to mandatory SHA-256. The native endpoint
+`GET /nuget/flat/<id>/<ver>/<id>.<ver>.nupkg.sha512` serves the archive digest as Base64 under
+the same read grants as the package, including yanked versions. Existing versions return
+`404` until enriched and reindexed. With an admin credential, call
+`POST /api/v1/packages/nuget/<id>/<version>/backfill-digests` for each existing version, then
+`POST /api/v1/packages/nuget/<id>/reindex` for each package. Backfill verifies stored size and
+SHA-256 first; rerunning is safe. Include yanked versions and repeat after uploads initialized
+before deployment have finished, as described for Composer above.
+
+The checksum endpoint does not by itself make `dotnet restore` verify server-provided hashes.
+For repeatable restores in PackageReference projects, enable `RestorePackagesWithLockFile`,
+commit `packages.lock.json`, and use `dotnet restore --locked-mode` in CI. NuGet compares its
+content hashes with the lock file; for signed packages these may differ from the full archive
+hash exposed by the endpoint. Existing author signatures survive unchanged archive uploads;
+verification follows the client's platform and `nuget.config` trust policy. The Worker does
+not add repository signatures.
+
 ## 10. Troubleshooting
 
 Start with the Worker's logs: **Workers & Pages** → `serverless-registry` → **Logs**, or

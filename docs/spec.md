@@ -220,7 +220,7 @@ The package name in the key is encoded safely: `/` and `@` in composer/npm names
 
 `native` is literally what the adapter needs to reproduce the entry in the index: for composer the whole `composer.json` of the version, for npm the `versions[v]` entry of the packument, for cargo the index line (`deps`, `features`, `cksum`).
 
-`files[].digests` (optional): additional digests besides `sha256`, e.g. `{ "sha1": "…", "md5": "…" }`, needed by ecosystems whose clients verify other algorithms (Maven). The adapter declares in `init` the list of required algorithms (`digests: ["sha1", "md5"]`), and the Worker computes them at `commit` while streaming the object from staging to its target key, and stores them in the manifest. Without a declaration by the adapter nothing is computed; `reindex` does not recompute digests. The `sha256` field stays mandatory and separate: it is the only digest that the CLI computes before sending, that the Worker enforces in the presign (`x-amz-checksum-sha256`) and checks at `commit`, so it is the proof of the upload's integrity, while `digests` are only derivatives for clients. Composer requests `sha1` and exposes it as `dist.shasum`; Maven requests `sha1`, `md5` and `sha512`. An explicit admin backfill may enrich existing manifests with missing adapter-declared digests, after verifying the stored bytes against their size and SHA-256. This does not change the release artifacts or publication metadata.
+`files[].digests` (optional): additional digests besides `sha256`, e.g. `{ "sha1": "…", "md5": "…" }`, needed by ecosystems whose clients verify other algorithms (Maven). The adapter declares in `init` the list of required algorithms (`digests: ["sha1", "md5"]`), and the Worker computes them at `commit` while streaming the object from staging to its target key, and stores them in the manifest. Without a declaration by the adapter nothing is computed; `reindex` does not recompute digests. The `sha256` field stays mandatory and separate: it is the only digest that the CLI computes before sending, that the Worker enforces in the presign (`x-amz-checksum-sha256`) and checks at `commit`, so it is the proof of the upload's integrity, while `digests` are only derivatives for clients. Composer requests `sha1` and exposes it as `dist.shasum`; NuGet requests `sha512` and exposes the raw archive digest as Base64 at `.nupkg.sha512`; Maven requests `sha1`, `md5` and `sha512`. An explicit admin backfill may enrich existing manifests with missing adapter-declared digests, after verifying the stored bytes against their size and SHA-256. This does not change the release artifacts or publication metadata.
 
 **Keys in KV**
 
@@ -391,16 +391,24 @@ Client: `.cargo/config.toml` with `[registries.<name>] index = "sparse+https://<
 
 **NuGet** (`/nuget/…`, V3 protocol)
 
-| Endpoint                                       | Returns                                                                                                                        |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /nuget/index.json`                        | service index with the resources `PackageBaseAddress/3.0.0`, `RegistrationsBaseUrl/3.6.0`, `SearchQueryService/3.5.0`          |
-| `GET /nuget/flat/<id>/index.json`              | `{ "versions": [...] }` – the versions covered by a grant, lower case, normalised                                              |
-| `GET /nuget/flat/<id>/<ver>/<id>.<ver>.nupkg`  | `302` → presigned GET                                                                                                          |
-| `GET /nuget/flat/<id>/<ver>/<id>.nuspec`       | the `.nuspec` from the manifest (`native`)                                                                                     |
-| `GET /nuget/registration/<id>/index.json`      | pages with a `catalogEntry` per version: `id`, `version`, `dependencyGroups` (by target framework), `listed`, `packageContent` |
-| `GET /nuget/search?q=&skip=&take=&prerelease=` | a simple search over `_meta/packages.json`, filtered by grants (needed for `dotnet package search`)                            |
+| Endpoint                                             | Returns                                                                                                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /nuget/index.json`                              | service index with the resources `PackageBaseAddress/3.0.0`, `RegistrationsBaseUrl/3.6.0`, `SearchQueryService/3.5.0`          |
+| `GET /nuget/flat/<id>/index.json`                    | `{ "versions": [...] }` – the versions covered by a grant, lower case, normalised                                              |
+| `GET /nuget/flat/<id>/<ver>/<id>.<ver>.nupkg`        | `302` → presigned GET                                                                                                          |
+| `GET /nuget/flat/<id>/<ver>/<id>.<ver>.nupkg.sha512` | Base64 SHA-512 of the archive, from `files[].digests.sha512`; `404` when absent                                                |
+| `GET /nuget/flat/<id>/<ver>/<id>.nuspec`             | the `.nuspec` from the manifest (`native`)                                                                                     |
+| `GET /nuget/registration/<id>/index.json`            | pages with a `catalogEntry` per version: `id`, `version`, `dependencyGroups` (by target framework), `listed`, `packageContent` |
+| `GET /nuget/search?q=&skip=&take=&prerelease=`       | a simple search over `_meta/packages.json`, filtered by grants (needed for `dotnet package search`)                            |
 
 Normalisation: identifiers and versions in paths are lower case; NuGet versions allow 4 parts (`1.0.0.0`) and have their own comparison rules, so the adapter provides its own `satisfies` and version validation. Yank = `listed: false`. An optional second file, a `.snupkg`, has the role `symbols`.
+
+NuGet archive checksums are computed at commit and served from the derived index; older
+versions need an explicit digest backfill followed by reindex. The checksum endpoint does
+not enable automatic server-hash validation in `dotnet restore`: NuGet uses lock-file content
+hashes and signed-package verification separately. Signed-package content hashes need not
+equal the raw archive SHA-512. Existing signed archives are preserved unchanged; the Worker
+does not sign packages or advertise a repository-signing service.
 
 Client: `dotnet nuget add source https://<domain>/nuget/index.json -n <name> -u <login> -p <password> --store-password-in-clear-text` (`packageSourceCredentials` in `nuget.config` → Basic; .NET drops `Authorization` on a redirect to another host, so the `302` to R2 works).
 
