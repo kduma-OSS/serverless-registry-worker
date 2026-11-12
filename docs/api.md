@@ -1091,7 +1091,7 @@ list in the staging declaration, and `commit` computes those digests while strea
 staged object to its final key (a `DigestStream`) and stores them as `files[].digests`
 (lower-case hex) in the manifest. Listings (6.6–6.8) and the generic feed return `digests`
 when present; `reindex` (6.11) never recomputes them. `sha256` stays mandatory and separate:
-it is declared by the client, enforced by the presigned `PUT` and checked at `commit`. The Composer adapter declares `sha1`; the Maven adapter declares `sha1`, `md5` and
+it is declared by the client, enforced by the presigned `PUT` and checked at `commit`. The Composer adapter declares `sha1`; NuGet declares `sha512`; the Maven adapter declares `sha1`, `md5` and
 `sha512` (see 6.4). Administrators may also enrich existing manifests through
 `backfill-digests` (6.11.1), without changing the artifact bytes.
 
@@ -2200,10 +2200,10 @@ otherwise every `/nuget/…` path answers `404 not_found`.
 - **Methods**: only `GET`; any other method answers `404 not_found`.
 - **Paths**: `<id>` and `<ver>` are lower case, with `<ver>` in the normalised form (5.2); the
   Worker matches `<id>` case-insensitively and normalises `<ver>` before matching.
-- **Responses**: JSON in UTF-8, except the `.nuspec` (XML) and the `302` redirect;
+- **Responses**: JSON in UTF-8, except the `.nuspec` (XML), `.nupkg.sha512` (plain text) and the `302` redirect;
   `Cache-Control: private, no-store` on every response. Error bodies follow section 4.
 - **Yank**: a yanked version has `listed: false` in the registration and is left out of
-  search, but the flat container still lists it and serves its `.nupkg` and `.nuspec`.
+  search, but the flat container still lists it and serves its `.nupkg`, `.nupkg.sha512` and `.nuspec`.
 - All URLs below are absolute and start with `PUBLIC_URL`.
 
 ### 9.2 `GET /nuget/index.json`
@@ -2246,6 +2246,27 @@ Errors: `404 not_found` when the package does not exist or no version is covered
 `302 Found` to a presigned `GET` URL of the `.nupkg`, valid for 15 minutes. .NET drops the
 `Authorization` header when it follows a redirect to another host, so the redirect to R2 works.
 Errors: `404 not_found`.
+
+### 9.4.1 `GET /nuget/flat/<id>/<ver>/<id>.<ver>.nupkg.sha512`
+
+`200 OK`, `Content-Type: text/plain; charset=utf-8`: the SHA-512 of the exact uploaded
+`.nupkg` bytes, encoded as Base64 (not hex), without a trailing newline. Authentication,
+version normalization, read grants (including transitive access), and yank behavior are the
+same as for the archive. `Cache-Control: private, no-store` applies to errors too.
+
+The NuGet adapter declares `digests: ["sha512"]`; commit computes and stores the hex digest
+in `files[].digests.sha512`. The flat index derives a per-version digest map from manifests,
+but the version-list response remains `{ "versions": [...] }` without that map.
+Errors: `404 not_found` for an unknown or inaccessible version, or a missing digest (including
+legacy indexes). Reindex alone does not compute missing digests: use admin `backfill-digests`
+(6.11.1), then reindex the package (6.11). No hashing takes place on download requests.
+
+This endpoint exposes an archive checksum for consumers that request it. It does not make
+standard `dotnet restore` compare downloads against a server-provided checksum. NuGet's
+`packages.lock.json` content hash and signed-package verification are separate client-side
+mechanisms. In particular, a signed package's lock-file content hash may differ from the
+SHA-512 of its complete archive. Neither `packageHash` catalog metadata nor a catalog service
+is added by this endpoint.
 
 ### 9.5 `GET /nuget/flat/<id>/<ver>/<id>.nuspec`
 
