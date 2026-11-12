@@ -10,6 +10,11 @@ out breaking changes and changes that require a data migration in their own sect
 
 ### Added
 
+- Composer archives include `dist.shasum` (SHA-1) so Composer verifies downloaded ZIPs,
+  while SHA-256 remains the upload integrity check. Existing versions can be enriched with
+  the admin-only `backfill-digests` endpoint and the resumable
+  `scripts/backfill-composer-shasum.mjs` tool, which verifies stored archives and reindexes
+  each package. Refresh existing consumer lock files to pick up the checksum.
 - Roles `yank` and `delete`: a credential can be allowed to yank or delete only the package
   versions its own grants (`yank_grants`, `delete_grants`) cover, without being an `admin`
   (who still yanks and deletes anywhere). They work with a `key`, a `gh` entry (`_:gh.<jwt>`)
