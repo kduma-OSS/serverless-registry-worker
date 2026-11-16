@@ -197,6 +197,7 @@ function indexEntry(m: Manifest, publicUrl: string): Json {
     type: "zip",
     url: distUrl(publicUrl, m.name, m.version),
     ...(archive === null ? {} : { reference: archive.sha256 }),
+    ...(archive?.digests?.sha1 === undefined ? {} : { shasum: archive.digests.sha1 }),
   };
   return entry;
 }
@@ -453,6 +454,7 @@ function versionSnippets(_baseUrl: string, name: string, version: string): Snipp
 /** The Composer adapter. */
 export const composerAdapter: Adapter = {
   eco: "composer",
+  digests: ["sha1"],
   parseManifest,
   fileKey: (m, file) => fileKey("composer", m.name, m.version, file.name),
   buildIndex,

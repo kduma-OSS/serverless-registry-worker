@@ -724,6 +724,62 @@ the manifests.
   `GET /api/v1/packages`). Reindex rebuilds the package's indexes from its manifests; a
   missing `_meta/packages.json` is rebuilt by the migrations as above.
 
+### Backfill Composer archive checksums
+
+New Composer publications include SHA-1 in `dist.shasum`, calculated from the uploaded ZIP
+in addition to the mandatory SHA-256. After deploying this feature, enrich existing versions
+from the Worker checkout with Node.js 22 or newer:
+
+```sh
+export REGISTRY_URL=https://packages.example.com
+# Set REGISTRY_TOKEN to an admin token through your usual secret environment mechanism.
+node scripts/backfill-composer-shasum.mjs
+# Optionally limit the operation to one package:
+node scripts/backfill-composer-shasum.mjs --package acme/sdk
+```
+
+The tool processes versions sequentially, including yanked versions. The Worker streams each
+archive once to compute missing digests and verify the size and SHA-256 before changing its
+manifest. It preserves archive bytes and publication metadata. A mismatch or missing artifact
+is reported as an error; investigate the stored object and restore the original archive from
+backup rather than accepting a different checksum.
+
+Check the final updated/skipped/error counts. The tool continues after individual failures
+and exits nonzero if any operation failed. Rerun it to resume: completed versions are skipped,
+and every visited package is reindexed even when no sums remain missing. This also repairs
+an interrupted run that wrote manifests but had not rebuilt their indexes. Ordinary reindex
+never reads archives or computes missing digests. No cron or blocking migration is installed.
+
+Uploads initialized before deployment retain their old digest declarations. Repeat the tool
+after those publication jobs have completed, or their staging data has been removed by cleanup
+(uncommitted uploads older than 24 hours). Upload URLs expire after 10 minutes, but already
+uploaded staging objects can still be committed later; URL expiry alone does not close that
+window. A rerun includes any versions committed by an older publication flow.
+
+Existing consumer `composer.lock` files do not gain `shasum` automatically. Consumers must
+refresh dependency metadata and commit the updated lock file to enable checksum verification
+for previously locked packages. SHA-1 is for Composer compatibility; SHA-256 remains the
+registry's upload integrity check.
+
+### NuGet archive checksums
+
+New NuGet publications compute SHA-512 in addition to mandatory SHA-256. The native endpoint
+`GET /nuget/flat/<id>/<ver>/<id>.<ver>.nupkg.sha512` serves the archive digest as Base64 under
+the same read grants as the package, including yanked versions. Existing versions return
+`404` until enriched and reindexed. With an admin credential, call
+`POST /api/v1/packages/nuget/<id>/<version>/backfill-digests` for each existing version, then
+`POST /api/v1/packages/nuget/<id>/reindex` for each package. Backfill verifies stored size and
+SHA-256 first; rerunning is safe. Include yanked versions and repeat after uploads initialized
+before deployment have finished, as described for Composer above.
+
+The checksum endpoint does not by itself make `dotnet restore` verify server-provided hashes.
+For repeatable restores in PackageReference projects, enable `RestorePackagesWithLockFile`,
+commit `packages.lock.json`, and use `dotnet restore --locked-mode` in CI. NuGet compares its
+content hashes with the lock file; for signed packages these may differ from the full archive
+hash exposed by the endpoint. Existing author signatures survive unchanged archive uploads;
+verification follows the client's platform and `nuget.config` trust policy. The Worker does
+not add repository signatures.
+
 ## 10. Troubleshooting
 
 Start with the Worker's logs: **Workers & Pages** → `serverless-registry` → **Logs**, or

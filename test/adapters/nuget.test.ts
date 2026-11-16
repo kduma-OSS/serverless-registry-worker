@@ -556,3 +556,51 @@ describe("clientConfig", () => {
     expect(adapter.clientConfig(BASE, "p:x", [])).toHaveLength(4);
   });
 });
+
+describe("archive SHA-512", () => {
+  const path = "/nuget/flat/Acme.Sdk/1.2.0.0-Beta/Acme.Sdk.1.2.0.0-Beta.nupkg.sha512";
+
+  it("routes checksums with the same id and version normalization as downloads", () => {
+    expect(get(path)).toEqual({
+      kind: "index",
+      key: nugetIndexKey("acme.sdk", "flat.json"),
+      name: "acme.sdk",
+      view: "sha512",
+      selector: { version: "1.2.0-beta" },
+    });
+    expect(get(path, "POST")).toBeNull();
+    expect(get(path.replace("Acme.Sdk.1.2.0.0-Beta.nupkg", "other.nupkg"))).toBeNull();
+    expect(get(path.replace("nupkg.sha512", "snupkg.sha512"))).toBeNull();
+  });
+
+  it("serves the archive hash as base64, including yanked versions, without leaking hashes in lists", () => {
+    expect(adapter.digests).toEqual(["sha512"]);
+    const m = stored("1.2.0-beta", { yanked: true });
+    const archive = m.files[0];
+    if (archive === undefined) throw new Error("Archive missing");
+    archive.digests = { sha512: "ab".repeat(64) };
+    const flat = indexes([m])[nugetIndexKey("acme.sdk", "flat.json")];
+    const route = get(path) as IndexRoute;
+    const response = adapter.filterIndex(flat, all, route) as RawIndexBody;
+    expect(response.body).toBe(btoa("\xab".repeat(64)));
+    expect(response.contentType).toBe("text/plain; charset=utf-8");
+    expect(adapter.filterIndex(flat, all)).toEqual({ versions: ["1.2.0-beta"] });
+    rejects(() => adapter.filterIndex(flat, () => false, route), "not_found");
+    rejects(
+      () => adapter.filterIndex(flat, all, { ...route, selector: { version: "9.0.0" } }),
+      "not_found",
+    );
+  });
+
+  it("returns not found for old indexes or missing and malformed digests", () => {
+    const route = get(path) as IndexRoute;
+    const flat = { name: "acme.sdk", versions: ["1.2.0-beta"] };
+    rejects(() => adapter.filterIndex(flat, all, route), "not_found");
+    for (const hash of [null, "", "a".repeat(64), "z".repeat(128)]) {
+      rejects(
+        () => adapter.filterIndex({ ...flat, sha512: { "1.2.0-beta": hash } }, all, route),
+        "not_found",
+      );
+    }
+  });
+});

@@ -443,6 +443,8 @@ value according to its HTTP status. A few codes add fields after these two (`amb
 | `version_closed`       | 409    | `append` to a version whose append window (`APPEND_WINDOW_HOURS`) has passed, or that is yanked.                             |
 | `file_exists`          | 409    | `append` with a file name that already exists in the version.                                                                |
 | `upload_mismatch`      | 409    | On `commit`: the size or SHA-256 of a staged file differs from the `init` declaration.                                       |
+| `artifact_mismatch`    | 409    | On digest backfill: the stored artifact differs from its declared size or SHA-256.                                           |
+| `version_changed`      | 409    | The publication or file declaration changed while backfill was computing digests; retry.                                     |
 | `credential_exists`    | 409    | `POST /api/v1/credentials` for a project that already exists.                                                                |
 | `ambiguous`            | 409    | Generic label-selected download (8.7): more than one file matches; the body also lists `version` and the candidate `files`.  |
 | `payload_too_large`    | 413    | Request body over 4 MiB, or the `size` of a file in `init` above `MAX_UPLOAD_BYTES`.                                         |
@@ -526,7 +528,7 @@ interface PackageFile {
   name: string; // unique within the version
   size: number;
   sha256: string;
-  digests?: Record<string, string>; // extra digests computed at commit (see 6.5), hex
+  digests?: Record<string, string>; // extra digests computed at commit or admin backfill (6.5, 6.11.1), hex
   role?: string; // per ecosystem (6.4), e.g. "archive", "symbols", "manifest", "pom"; absent for generic
   labels?: Record<string, string>; // generic: always present ({} when none); absent elsewhere
 }
@@ -684,30 +686,31 @@ packages depend on, as long as they are in this registry:
 
 ## 6. Endpoints
 
-| Method | Path                                                  | Role                              | Section |
-| ------ | ----------------------------------------------------- | --------------------------------- | ------- |
-| GET    | `/api/v1/version`                                     | none                              | 6.2     |
-| GET    | `/api/v1/whoami`                                      | any                               | 6.3     |
-| POST   | `/api/v1/publish/init`                                | `publish`                         | 6.4     |
-| POST   | `/api/v1/publish/commit`                              | `publish`                         | 6.5     |
-| GET    | `/api/v1/packages`                                    | `read`, `yank`, `delete`, `admin` | 6.6     |
-| GET    | `/api/v1/packages/<eco>/<name>`                       | `read`, `yank`, `delete`, `admin` | 6.7     |
-| POST   | `/api/v1/packages/<eco>/<name>/<version>/yank`        | `yank`, `admin`                   | 6.8     |
-| DELETE | `/api/v1/packages/<eco>/<name>/<version>`             | `delete`, `admin`                 | 6.9     |
-| DELETE | `/api/v1/packages/<eco>/<name>`                       | `delete`, `admin`                 | 6.10    |
-| POST   | `/api/v1/packages/<eco>/<name>/reindex`               | `admin`                           | 6.11    |
-| GET    | `/api/v1/credentials`                                 | `admin`                           | 6.12    |
-| POST   | `/api/v1/credentials`                                 | `admin`                           | 6.13    |
-| GET    | `/api/v1/credentials/<project>`                       | `admin`                           | 6.14    |
-| PATCH  | `/api/v1/credentials/<project>`                       | `admin`                           | 6.15    |
-| DELETE | `/api/v1/credentials/<project>`                       | `admin`                           | 6.16    |
-| POST   | `/api/v1/auth/sessions`                               | none                              | 6.20    |
-| POST   | `/api/v1/auth/sessions/poll`                          | none                              | 6.21    |
-| POST   | `/api/v1/credentials/<project>/secrets`               | `admin`                           | 6.17    |
-| PATCH  | `/api/v1/credentials/<project>/secrets/<hash-prefix>` | `admin`                           | 6.22    |
-| DELETE | `/api/v1/credentials/<project>/secrets/<hash-prefix>` | `admin`                           | 6.18    |
-| GET    | `/api/v1/github/repository?name=<owner/repo>`         | `admin`                           | 6.19    |
-| POST   | `/api/v1/bucket/accept`                               | `admin`                           | 6.23    |
+| Method | Path                                                       | Role                              | Section |
+| ------ | ---------------------------------------------------------- | --------------------------------- | ------- |
+| GET    | `/api/v1/version`                                          | none                              | 6.2     |
+| GET    | `/api/v1/whoami`                                           | any                               | 6.3     |
+| POST   | `/api/v1/publish/init`                                     | `publish`                         | 6.4     |
+| POST   | `/api/v1/publish/commit`                                   | `publish`                         | 6.5     |
+| GET    | `/api/v1/packages`                                         | `read`, `yank`, `delete`, `admin` | 6.6     |
+| GET    | `/api/v1/packages/<eco>/<name>`                            | `read`, `yank`, `delete`, `admin` | 6.7     |
+| POST   | `/api/v1/packages/<eco>/<name>/<version>/yank`             | `yank`, `admin`                   | 6.8     |
+| DELETE | `/api/v1/packages/<eco>/<name>/<version>`                  | `delete`, `admin`                 | 6.9     |
+| DELETE | `/api/v1/packages/<eco>/<name>`                            | `delete`, `admin`                 | 6.10    |
+| POST   | `/api/v1/packages/<eco>/<name>/reindex`                    | `admin`                           | 6.11    |
+| POST   | `/api/v1/packages/<eco>/<name>/<version>/backfill-digests` | `admin`                           | 6.11.1  |
+| GET    | `/api/v1/credentials`                                      | `admin`                           | 6.12    |
+| POST   | `/api/v1/credentials`                                      | `admin`                           | 6.13    |
+| GET    | `/api/v1/credentials/<project>`                            | `admin`                           | 6.14    |
+| PATCH  | `/api/v1/credentials/<project>`                            | `admin`                           | 6.15    |
+| DELETE | `/api/v1/credentials/<project>`                            | `admin`                           | 6.16    |
+| POST   | `/api/v1/auth/sessions`                                    | none                              | 6.20    |
+| POST   | `/api/v1/auth/sessions/poll`                               | none                              | 6.21    |
+| POST   | `/api/v1/credentials/<project>/secrets`                    | `admin`                           | 6.17    |
+| PATCH  | `/api/v1/credentials/<project>/secrets/<hash-prefix>`      | `admin`                           | 6.22    |
+| DELETE | `/api/v1/credentials/<project>/secrets/<hash-prefix>`      | `admin`                           | 6.18    |
+| GET    | `/api/v1/github/repository?name=<owner/repo>`              | `admin`                           | 6.19    |
+| POST   | `/api/v1/bucket/accept`                                    | `admin`                           | 6.23    |
 
 ### 6.1 Auth entry identifiers
 
@@ -1088,8 +1091,9 @@ list in the staging declaration, and `commit` computes those digests while strea
 staged object to its final key (a `DigestStream`) and stores them as `files[].digests`
 (lower-case hex) in the manifest. Listings (6.6–6.8) and the generic feed return `digests`
 when present; `reindex` (6.11) never recomputes them. `sha256` stays mandatory and separate:
-it is declared by the client, enforced by the presigned `PUT` and checked at `commit`. Only
-the maven adapter declares extra digests (`sha1`, `md5` and `sha512`, see 6.4).
+it is declared by the client, enforced by the presigned `PUT` and checked at `commit`. The Composer adapter declares `sha1`; NuGet declares `sha512`; the Maven adapter declares `sha1`, `md5` and
+`sha512` (see 6.4). Administrators may also enrich existing manifests through
+`backfill-digests` (6.11.1), without changing the artifact bytes.
 
 The rules are checked against the state at commit time. Without `append`, the first commit of
 a version wins and later ones get `409 version_exists`. With `append`, a commit that finds the
@@ -1345,6 +1349,32 @@ Response `200`:
 
 `manifests` is the number of version manifests the index was built from. Errors:
 `404 not_found` when the package has no manifests.
+
+### 6.11.1 `POST /api/v1/packages/<eco>/<name>/<version>/backfill-digests`
+
+Role `admin`. No body. Reads each file missing an adapter-declared digest from R2 and
+computes the missing digests while streaming. It verifies the stored size and SHA-256
+against the manifest before persisting any change. Existing digests, publication metadata,
+yank state and archive bytes are preserved. An adapter without extra digests is a no-op.
+
+Response `200`:
+
+```json
+{ "eco": "composer", "name": "acme/sdk", "version": "1.0.0", "updated": true }
+```
+
+`updated` is false if there were no missing digests (including a concurrent backfill that
+finished first). The manifest is updated conditionally, preserving a concurrent yank;
+a deleted manifest is never recreated, and a changed publication or file declaration
+aborts the operation. No partial digests are persisted if any file fails verification.
+Errors: `404 not_found` for an unknown version or missing artifact, `409 artifact_mismatch`
+for a size or SHA-256 mismatch, and `409 version_changed` for a changed declaration.
+
+This endpoint does not rebuild indexes. After processing a package, call `reindex` (6.11),
+even when every version already has its digests, to recover from an interrupted earlier run.
+Composer metadata emits the archive's `files[].digests.sha1` as `dist.shasum` (40 lower-case
+hex characters), retaining SHA-256 in `dist.reference`. Older manifests omit `shasum` until
+backfilled. Client-supplied sums are ignored. No CLI upgrade or schema migration is required.
 
 ### 6.12 `GET /api/v1/credentials`
 
@@ -2170,10 +2200,10 @@ otherwise every `/nuget/…` path answers `404 not_found`.
 - **Methods**: only `GET`; any other method answers `404 not_found`.
 - **Paths**: `<id>` and `<ver>` are lower case, with `<ver>` in the normalised form (5.2); the
   Worker matches `<id>` case-insensitively and normalises `<ver>` before matching.
-- **Responses**: JSON in UTF-8, except the `.nuspec` (XML) and the `302` redirect;
+- **Responses**: JSON in UTF-8, except the `.nuspec` (XML), `.nupkg.sha512` (plain text) and the `302` redirect;
   `Cache-Control: private, no-store` on every response. Error bodies follow section 4.
 - **Yank**: a yanked version has `listed: false` in the registration and is left out of
-  search, but the flat container still lists it and serves its `.nupkg` and `.nuspec`.
+  search, but the flat container still lists it and serves its `.nupkg`, `.nupkg.sha512` and `.nuspec`.
 - All URLs below are absolute and start with `PUBLIC_URL`.
 
 ### 9.2 `GET /nuget/index.json`
@@ -2216,6 +2246,27 @@ Errors: `404 not_found` when the package does not exist or no version is covered
 `302 Found` to a presigned `GET` URL of the `.nupkg`, valid for 15 minutes. .NET drops the
 `Authorization` header when it follows a redirect to another host, so the redirect to R2 works.
 Errors: `404 not_found`.
+
+### 9.4.1 `GET /nuget/flat/<id>/<ver>/<id>.<ver>.nupkg.sha512`
+
+`200 OK`, `Content-Type: text/plain; charset=utf-8`: the SHA-512 of the exact uploaded
+`.nupkg` bytes, encoded as Base64 (not hex), without a trailing newline. Authentication,
+version normalization, read grants (including transitive access), and yank behavior are the
+same as for the archive. `Cache-Control: private, no-store` applies to errors too.
+
+The NuGet adapter declares `digests: ["sha512"]`; commit computes and stores the hex digest
+in `files[].digests.sha512`. The flat index derives a per-version digest map from manifests,
+but the version-list response remains `{ "versions": [...] }` without that map.
+Errors: `404 not_found` for an unknown or inaccessible version, or a missing digest (including
+legacy indexes). Reindex alone does not compute missing digests: use admin `backfill-digests`
+(6.11.1), then reindex the package (6.11). No hashing takes place on download requests.
+
+This endpoint exposes an archive checksum for consumers that request it. It does not make
+standard `dotnet restore` compare downloads against a server-provided checksum. NuGet's
+`packages.lock.json` content hash and signed-package verification are separate client-side
+mechanisms. In particular, a signed package's lock-file content hash may differ from the
+SHA-512 of its complete archive. Neither `packageHash` catalog metadata nor a catalog service
+is added by this endpoint.
 
 ### 9.5 `GET /nuget/flat/<id>/<ver>/<id>.nuspec`
 

@@ -2,6 +2,7 @@ node_modules
 .wrangler
 dist
 coverage
+.context
 package-lock.json
 test/fixtures
 test/core/qr.fixtures.json

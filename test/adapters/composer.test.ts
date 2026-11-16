@@ -335,6 +335,28 @@ describe("buildIndex", () => {
     expect(entry).not.toHaveProperty("dist.shasum");
   });
 
+  it("emits computed SHA-1 and preserves mixed legacy metadata through filtering", () => {
+    expect(adapter.digests).toEqual(["sha1"]);
+    const versions = ["3.0.0", "2.0.0", "1.0.0"].map((v) =>
+      manifest(v, { ...fixture, dist: { shasum: "forged" } }),
+    );
+    const sha1 = "b".repeat(40);
+    for (const i of [0, 2]) {
+      const file = versions[i]?.files[0];
+      if (file !== undefined) file.digests = { sha1 };
+    }
+    const [p2] = adapter.buildIndex("acme/x", versions, { publicUrl: BASE });
+    const body = JSON.parse(p2?.body ?? "") as { packages: Record<string, unknown[]> };
+    const entries = expand(body.packages["acme/x"] ?? []);
+    expect(entries.map((e) => (e.dist as Record<string, unknown>).shasum)).toEqual([
+      sha1,
+      undefined,
+      sha1,
+    ]);
+    const filtered = adapter.filterIndex(body, (_n, v) => v !== "3.0.0") as typeof body;
+    expect(expand(filtered.packages["acme/x"] ?? [])).toEqual(entries.slice(1));
+  });
+
   it("writes an empty list when every version is yanked", () => {
     const [p2] = adapter.buildIndex("acme/x", [manifest("1.0.0", native("a"), true)], {
       publicUrl: BASE,

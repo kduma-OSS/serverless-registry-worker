@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 import { expand } from "../../src/adapters/composer/index";
-import { stagingKey } from "../../src/core/storage";
+import { readManifest, stagingKey, manifestKey } from "../../src/core/storage";
 import {
   ORIGIN,
   call,
@@ -48,6 +48,75 @@ beforeAll(async () => {
 });
 
 describe("composer publishing through the API", () => {
+  it("computes shasum from uploaded bytes, ignoring client-supplied digests", async () => {
+    const name = "acme/checksummed";
+    const bytes = new TextEncoder().encode("The quick brown fox jumps over the lazy dog");
+    const init = await call("POST", "/api/v1/publish/init", {
+      token: ci,
+      body: {
+        eco: "composer",
+        name,
+        version: "1.0.0",
+        files: [
+          {
+            name: "a.zip",
+            size: bytes.length,
+            sha256: await sha256Hex(bytes),
+            digests: { sha1: "forged" },
+          },
+        ],
+        manifest: { name, dist: { shasum: "forged" } },
+      },
+    });
+    const { uploadId } = await init.json<InitResult>();
+    await env.R2_BUCKET.put(stagingKey(uploadId, "a.zip"), bytes);
+    expect(
+      (await call("POST", "/api/v1/publish/commit", { token: ci, body: { uploadId } })).status,
+    ).toBe(201);
+    const expected = "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12";
+    expect((await readManifest(env, "composer", name, "1.0.0"))?.files[0]?.digests?.sha1).toBe(
+      expected,
+    );
+    const p2 = await (await call("GET", `/composer/p2/${name}.json`, { token: admin })).json<P2>();
+    expect(expand(p2.packages[name] ?? [])[0]?.dist).toMatchObject({ shasum: expected });
+  });
+
+  it("backfills old yanked versions for admins and exposes the sum after reindex", async () => {
+    const name = "acme/legacy";
+    expect((await publishComposer(ci, name, "1.0.0", "legacy bytes")).status).toBe(201);
+    const m = await readManifest(env, "composer", name, "1.0.0");
+    if (m === null) throw new Error("Missing test manifest");
+    delete m.files[0]?.digests;
+    m.yanked = true;
+    await env.R2_BUCKET.put(manifestKey("composer", name, "1.0.0"), JSON.stringify(m));
+    const base = `/api/v1/packages/composer/${encodeURIComponent(name)}`;
+    const path = `${base}/1.0.0/backfill-digests`;
+    expect((await call("POST", path)).status).toBe(401);
+    for (const token of [ci, reader])
+      expect((await call("POST", path, { token })).status).toBe(403);
+    const first = await call("POST", path, { token: admin });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ eco: "composer", name, version: "1.0.0", updated: true });
+    expect(await (await call("POST", path, { token: admin })).json()).toMatchObject({
+      updated: false,
+    });
+    const enriched = await readManifest(env, "composer", name, "1.0.0");
+    expect(enriched?.yanked).toBe(true);
+    expect(enriched?.files[0]?.digests?.sha1).toMatch(/^[0-9a-f]{40}$/);
+    // Unyank only in the fixture so the rebuilt p2 metadata can expose this archive.
+    await env.R2_BUCKET.put(
+      manifestKey("composer", name, "1.0.0"),
+      JSON.stringify({ ...enriched, yanked: false }),
+    );
+    expect((await call("POST", `${base}/reindex`, { token: admin })).status).toBe(200);
+    const body = await (
+      await call("GET", `/composer/p2/${name}.json`, { token: admin })
+    ).json<P2>();
+    expect(expand(body.packages[name] ?? [])[0]?.dist).toMatchObject({
+      shasum: enriched?.files[0]?.digests?.sha1,
+    });
+  });
+
   it("answers commit with the native download URLs", async () => {
     const res = await publishComposer(ci, "acme/fresh", "0.1.0-beta.1");
     expect(res.status).toBe(201);

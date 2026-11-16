@@ -974,7 +974,8 @@ export function headStaged(
 }
 
 /** Web Crypto names of the extra digest algorithms. */
-const DIGEST_STREAM_NAMES: Readonly<Record<DigestAlgorithm, string>> = {
+const DIGEST_STREAM_NAMES: Readonly<Record<DigestAlgorithm | "sha256", string>> = {
+  sha256: "SHA-256",
   sha1: "SHA-1",
   md5: "MD5",
   sha512: "SHA-512",
@@ -987,7 +988,7 @@ function hex(buffer: ArrayBuffer): string {
 /** Reads a stream to its end through one `DigestStream` per algorithm; lower-case hex. */
 async function digestStream(
   stream: ReadableStream<Uint8Array>,
-  algorithms: readonly DigestAlgorithm[],
+  algorithms: readonly (DigestAlgorithm | "sha256")[],
 ): Promise<Record<string, string>> {
   const sinks = algorithms.map((a) => new crypto.DigestStream(DIGEST_STREAM_NAMES[a]));
   const writers = sinks.map((sink) => sink.getWriter());
@@ -1000,6 +1001,24 @@ async function digestStream(
   await Promise.all(writers.map((writer) => writer.close()));
   const digests = await Promise.all(sinks.map((sink) => sink.digest));
   return Object.fromEntries(algorithms.map((a, i) => [a, hex(digests[i] ?? new ArrayBuffer(0))]));
+}
+
+/** Reads an existing artifact once, verifying it before returning derived digests. */
+export async function computeStoredDigests(
+  env: StorageEnv,
+  key: string,
+  file: ManifestFile,
+  algorithms: readonly DigestAlgorithm[],
+): Promise<Record<string, string>> {
+  const object = await env.R2_BUCKET.get(key);
+  if (object === null) throw new ValidationError("not_found", "Artifact not found.");
+  if (object.size !== file.size) {
+    await object.body.cancel();
+    throw new ValidationError("artifact_mismatch");
+  }
+  const { sha256, ...digests } = await digestStream(object.body, [...algorithms, "sha256"]);
+  if (sha256 !== file.sha256) throw new ValidationError("artifact_mismatch");
+  return digests;
 }
 
 /** A promoted file: the new object and the extra digests computed on the way. */
